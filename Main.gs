@@ -11,6 +11,7 @@ function onOpen() {
     .addItem('Refresh RAW_ALL from PLAN (Google)', 'refreshRawAllFromPlanGoogle')
     .addItem('Refresh RAW_ALL from PLAN (Meta)', 'refreshRawAllFromPlanMeta')
     .addItem('Build SUMMARY', 'buildSummary')
+    .addItem('Build DASHBOARD', 'buildDashboard')
     .addItem('Run full pipeline', 'runFullPipeline')
     .addToUi();
 }
@@ -22,6 +23,7 @@ function setupSheets() {
     ensureHeader_(SHEETS.RAW_ALL, HEADERS.RAW_ALL);
     ensureHeader_(SHEETS.SUMMARY, HEADERS.SUMMARY);
     ensureHeader_(SHEETS.LOG, HEADERS.LOG);
+    ensureHeader_(SHEETS.REACH_CACHE, HEADERS.REACH_CACHE);
     SpreadsheetApp.getUi().alert('Sheets created/validated.');
   });
 }
@@ -77,6 +79,7 @@ function runFullPipeline() {
     refreshRawAllFromPlan_('google');
     refreshRawAllFromPlan_('meta');
     buildSummary();
+    buildDashboard();
     SpreadsheetApp.getUi().alert('Full pipeline complete.');
   });
 }

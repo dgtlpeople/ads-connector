@@ -1,3 +1,5 @@
+var GOOGLE_SKIP_UNIQUE_USERS_FOR_RUN_ = false;
+
 function getGoogleAdsConfig_() {
   const props = getScriptProps_();
   const cfg = {
@@ -52,18 +54,28 @@ function googleAdsSearchStream_(query) {
     headers['login-customer-id'] = cfg.loginCustomerId;
   }
 
-  const res = UrlFetchApp.fetch(url, {
-    method: 'post',
-    headers: headers,
-    payload: JSON.stringify({ query: query }),
-    muteHttpExceptions: true
-  });
+  const maxAttempts = 4;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const res = UrlFetchApp.fetch(url, {
+      method: 'post',
+      headers: headers,
+      payload: JSON.stringify({ query: query }),
+      muteHttpExceptions: true
+    });
 
-  if (res.getResponseCode() < 200 || res.getResponseCode() >= 300) {
-    throw new Error('Google Ads API error ' + res.getResponseCode() + ': ' + res.getContentText());
+    const code = res.getResponseCode();
+    const body = res.getContentText();
+    if (code >= 200 && code < 300) {
+      return JSON.parse(body);
+    }
+
+    const retryable = isGoogleRetryableError_(code, body);
+    if (!retryable || attempt === maxAttempts) {
+      throw new Error('Google Ads API error ' + code + ': ' + body);
+    }
+
+    Utilities.sleep(Math.pow(2, attempt) * 1000);
   }
-
-  return JSON.parse(res.getContentText());
 }
 
 function loadGoogleEntities() {
@@ -131,40 +143,69 @@ function fetchGoogleEntityMetrics_(entity) {
     throw new Error('Invalid Google campaign ID: ' + entity.entity_id);
   }
 
+  const fields = [
+    'campaign.id',
+    'campaign.name',
+    'campaign.start_date',
+    'campaign.end_date',
+    'campaign.status',
+    'campaign.advertising_channel_type',
+    'metrics.impressions',
+    'metrics.average_cpm',
+    'metrics.video_quartile_p25_rate',
+    'metrics.video_quartile_p50_rate',
+    'metrics.video_quartile_p75_rate',
+    'metrics.video_quartile_p100_rate'
+  ];
+  if (!GOOGLE_SKIP_UNIQUE_USERS_FOR_RUN_) {
+    fields.push('metrics.unique_users');
+  }
+
   const baseQuery = [
     'SELECT',
-    '  campaign.id,',
-    '  campaign.name,',
-    '  campaign.start_date,',
-    '  campaign.end_date,',
-    '  campaign.status,',
-    '  campaign.advertising_channel_type,',
-    '  metrics.impressions,',
-    '  metrics.average_cpm,',
-    '  metrics.video_quartile_p25_rate,',
-    '  metrics.video_quartile_p50_rate,',
-    '  metrics.video_quartile_p75_rate,',
-    '  metrics.video_quartile_p100_rate,',
-    '  metrics.unique_users',
+    '  ' + fields.join(',\n  '),
     'FROM campaign',
     'WHERE campaign.id = ' + campaignId
   ].join('\n');
 
   let selected = null;
+  let uniqueUsersFetchSucceeded = false;
   try {
     selected = flattenGoogleMetricRow_(googleAdsSearchStream_(baseQuery));
+    uniqueUsersFetchSucceeded = !GOOGLE_SKIP_UNIQUE_USERS_FOR_RUN_ && fields.indexOf('metrics.unique_users') !== -1;
   } catch (e) {
-    log_('Google unique_users query fallback', e.message);
+    const attemptedUniqueUsers = fields.indexOf('metrics.unique_users') !== -1;
+    if (!attemptedUniqueUsers) throw e;
+
+    if (!GOOGLE_SKIP_UNIQUE_USERS_FOR_RUN_ && isGoogleBandwidthQuotaError_(e.message || '')) {
+      GOOGLE_SKIP_UNIQUE_USERS_FOR_RUN_ = true;
+      log_('Google unique_users disabled for run', e.message);
+    } else {
+      log_('Google unique_users query failed', e.message);
+    }
+
     const fallbackQuery = baseQuery.replace(',\n  metrics.unique_users', '');
     selected = flattenGoogleMetricRow_(googleAdsSearchStream_(fallbackQuery));
+    uniqueUsersFetchSucceeded = false;
   }
 
   if (!selected) {
     return null;
   }
 
-  const reach = selected.uniqueUsers === '' ? 0 : toNumber_(selected.uniqueUsers);
+  let reach = selected.uniqueUsers === '' || selected.uniqueUsers === undefined
+    ? 0
+    : toNumber_(selected.uniqueUsers);
   const impressions = toNumber_(selected.impressions);
+
+  if (uniqueUsersFetchSucceeded && selected.uniqueUsers !== undefined && selected.uniqueUsers !== '') {
+    upsertGoogleReachCache_(campaignId, reach);
+  } else {
+    const cachedReach = getCachedGoogleReach_(campaignId);
+    if (cachedReach !== null) {
+      reach = cachedReach;
+    }
+  }
 
   return {
     platform: 'google',
@@ -189,6 +230,22 @@ function fetchGoogleEntityMetrics_(entity) {
     status: selected.status || '',
     channel_type: selected.channelType || ''
   };
+}
+
+function isGoogleRetryableError_(code, body) {
+  if (code === 429 || code === 500 || code === 502 || code === 503 || code === 504) return true;
+  const text = String(body || '').toLowerCase();
+  return (
+    text.indexOf('resource_exhausted') !== -1 ||
+    text.indexOf('rate exceeded') !== -1 ||
+    text.indexOf('quota exceeded') !== -1 ||
+    text.indexOf('temporarily unavailable') !== -1
+  );
+}
+
+function isGoogleBandwidthQuotaError_(text) {
+  const t = String(text || '').toLowerCase();
+  return t.indexOf('bandwidth quota exceeded') !== -1;
 }
 
 function flattenGoogleMetricRow_(chunks) {
@@ -233,4 +290,46 @@ function mapCampaignEnabledRow_(row) {
     row.status || '',
     row.channel_type || ''
   ];
+}
+
+function getCachedGoogleReach_(campaignId) {
+  ensureHeader_(SHEETS.REACH_CACHE, HEADERS.REACH_CACHE);
+  const cacheRows = readObjects_(SHEETS.REACH_CACHE);
+  for (let i = 0; i < cacheRows.length; i++) {
+    const r = cacheRows[i];
+    if (
+      normalizePlatform_(r.platform) === 'google' &&
+      normalizeEntityLevel_(r.entity_level) === 'campaign' &&
+      normalizeId_(r.entity_id).replace(/-/g, '') === normalizeId_(campaignId).replace(/-/g, '')
+    ) {
+      return toNumber_(r.reach);
+    }
+  }
+  return null;
+}
+
+function upsertGoogleReachCache_(campaignId, reach) {
+  ensureHeader_(SHEETS.REACH_CACHE, HEADERS.REACH_CACHE);
+  const sh = getSheet_(SHEETS.REACH_CACHE);
+  const lastRow = sh.getLastRow();
+  const safeCampaignId = normalizeId_(campaignId).replace(/-/g, '');
+  const rowData = ['google', '', 'campaign', safeCampaignId, toNumber_(reach), new Date()];
+
+  if (lastRow <= 1) {
+    sh.getRange(2, 1, 1, rowData.length).setValues([rowData]);
+    return;
+  }
+
+  const values = sh.getRange(2, 1, lastRow - 1, HEADERS.REACH_CACHE.length).getValues();
+  for (let i = 0; i < values.length; i++) {
+    const platform = normalizePlatform_(values[i][0]);
+    const level = normalizeEntityLevel_(values[i][2]);
+    const entityId = normalizeId_(values[i][3]).replace(/-/g, '');
+    if (platform === 'google' && level === 'campaign' && entityId === safeCampaignId) {
+      sh.getRange(i + 2, 1, 1, rowData.length).setValues([rowData]);
+      return;
+    }
+  }
+
+  sh.getRange(lastRow + 1, 1, 1, rowData.length).setValues([rowData]);
 }

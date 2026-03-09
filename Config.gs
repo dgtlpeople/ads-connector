@@ -3,7 +3,9 @@ const SHEETS = {
   PLAN: 'PLAN',
   RAW_ALL: 'RAW_ALL',
   SUMMARY: 'SUMMARY',
-  LOG: 'LOG'
+  LOG: 'LOG',
+  REACH_CACHE: 'REACH_CACHE',
+  DASHBOARD: 'DASHBOARD'
 };
 
 const HEADERS = {
@@ -90,7 +92,15 @@ const HEADERS = {
     'status',
     'channel_type'
   ],
-  LOG: ['timestamp', 'message', 'detail']
+  LOG: ['timestamp', 'message', 'detail'],
+  REACH_CACHE: [
+    'platform',
+    'account_id',
+    'entity_level',
+    'entity_id',
+    'reach',
+    'last_success_at'
+  ]
 };
 
 const SCRIPT_PROPERTY_KEYS = [
