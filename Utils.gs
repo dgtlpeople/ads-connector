@@ -103,3 +103,15 @@ function withErrorLogging_(message, fn) {
     throw e;
   }
 }
+
+function sortCampaignsEnabled_() {
+  const sh = getSheet_(SHEETS.CAMPAIGNS_ENABLED);
+  const lastRow = sh.getLastRow();
+  const lastCol = sh.getLastColumn();
+  if (lastRow <= 2 || lastCol <= 0) return;
+
+  sh.getRange(2, 1, lastRow - 1, lastCol).sort([
+    { column: 1, ascending: true }, // platform
+    { column: 5, ascending: true }  // entity_name
+  ]);
+}

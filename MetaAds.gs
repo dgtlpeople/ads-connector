@@ -124,6 +124,7 @@ function loadMetaEntities() {
     });
 
     if (out.length) appendRows_(SHEETS.CAMPAIGNS_ENABLED, out);
+    sortCampaignsEnabled_();
   });
 }
 
