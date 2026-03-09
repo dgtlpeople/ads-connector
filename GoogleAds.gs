@@ -443,7 +443,9 @@ function mutateGoogleCampaignBudgetByFactor_(campaignId, factor) {
     );
   }
 
-  const newAmountMicros = Math.max(1000000, Math.round(currentValue * factor));
+  let newAmountMicros = Math.max(1000000, Math.round(currentValue * factor));
+  const inferredUnit = inferMoneyUnitMicros_(currentValue);
+  newAmountMicros = alignMicrosToUnit_(newAmountMicros, inferredUnit);
   const update = { resourceName: budgetResourceName };
   if (fieldToUpdate === 'amount_micros') {
     update.amountMicros = String(newAmountMicros);
@@ -451,17 +453,41 @@ function mutateGoogleCampaignBudgetByFactor_(campaignId, factor) {
     update.totalAmountMicros = String(newAmountMicros);
   }
 
-  googleAdsMutateCampaignBudgets_({
+  const mutatePayload = {
     operations: [{
       update: update,
       updateMask: fieldToUpdate
     }]
-  }, {
+  };
+  const mutateMeta = {
     action: factor >= 1 ? 'Increase budget' : 'Decrease budget',
     entityLevel: 'campaign',
     entityId: safeCampaignId,
     resourceName: budgetResourceName
-  });
+  };
+
+  try {
+    googleAdsMutateCampaignBudgets_(mutatePayload, mutateMeta);
+  } catch (err) {
+    if (!isMoneyMinimumUnitError_(err)) {
+      throw err;
+    }
+
+    // Retry with coarse alignment (1 currency unit) for strict account currencies.
+    const retryAmountMicros = alignMicrosToUnit_(newAmountMicros, 1000000);
+    if (retryAmountMicros === newAmountMicros) {
+      throw err;
+    }
+
+    if (fieldToUpdate === 'amount_micros') {
+      update.amountMicros = String(retryAmountMicros);
+    } else {
+      update.totalAmountMicros = String(retryAmountMicros);
+    }
+
+    googleAdsMutateCampaignBudgets_(mutatePayload, mutateMeta);
+    newAmountMicros = retryAmountMicros;
+  }
 
   return {
     budgetResourceName: budgetResourceName,
@@ -521,6 +547,28 @@ function googleAdsMutateCampaignBudgets_(payload, meta) {
   });
 
   return JSON.parse(body);
+}
+
+function inferMoneyUnitMicros_(amountMicros) {
+  const amount = Math.max(1, Math.round(toNumber_(amountMicros)));
+  const candidates = [1000000, 100000, 10000, 1000, 100, 10, 1];
+  for (let i = 0; i < candidates.length; i++) {
+    if (amount % candidates[i] === 0) {
+      return candidates[i];
+    }
+  }
+  return 10000;
+}
+
+function alignMicrosToUnit_(amountMicros, unitMicros) {
+  const unit = Math.max(1, Math.round(toNumber_(unitMicros)));
+  const amount = Math.max(unit, Math.round(toNumber_(amountMicros)));
+  return Math.max(1000000, Math.round(amount / unit) * unit);
+}
+
+function isMoneyMinimumUnitError_(err) {
+  const text = String((err && err.message) || err || '').toLowerCase();
+  return text.indexOf('money amount was not a multiple of a minimum unit') !== -1;
 }
 
 function mutateGoogleCampaignFrequencyCap_(campaignId, direction) {

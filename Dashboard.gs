@@ -71,7 +71,15 @@ function buildDashboard() {
       sh.getRange(10, 1, values.length, 9).setValues(values);
       sh.getRange(10, 4, values.length, 3).setNumberFormat('0.00%');
       sh.getRange(10, 1, values.length, 9).setBackground('#F8FAFC');
-      sh.getRange(10, 8, values.length, 1).insertCheckboxes();
+      ranked.forEach(function (r, idx) {
+        const row = 10 + idx;
+        const runCell = sh.getRange(row, 8);
+        runCell.clearDataValidations();
+        runCell.setValue(false);
+        if (normalizePlatform_(r.platform) === 'google') {
+          runCell.insertCheckboxes();
+        }
+      });
     }
 
     const dataLastRow = Math.max(10, 9 + ranked.length);
