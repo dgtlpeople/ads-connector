@@ -143,13 +143,50 @@ function handleDashboardActionEdit_(e) {
     } else if (!campaignId) {
       result = 'Skipped: missing campaign ID';
     } else {
-      result = executeGoogleDashboardAction_(campaignId, action);
+      const impressionPace = toNumber_(rowValues[3]);
+      result = executeGoogleDashboardAction_(campaignId, action, impressionPace);
     }
   } catch (err) {
-    result = 'ERROR: ' + err.message;
+    result = 'ERROR: ' + summarizeDashboardError_(err);
     log_('Dashboard run failed', 'row=' + row + '; campaign_id=' + campaignId + '; ' + err.message);
   }
 
   sh.getRange(row, 9).setValue(formatDate_(new Date()) + ' ' + result);
   sh.getRange(row, 8).setValue(false);
+}
+
+function summarizeDashboardError_(err) {
+  const raw = String((err && err.message) || err || '');
+  const shortGoogle = extractGoogleErrorSummary_(raw);
+  if (shortGoogle) return shortGoogle;
+  const singleLine = raw.replace(/\s+/g, ' ').trim();
+  return singleLine.length > 180 ? singleLine.slice(0, 177) + '...' : singleLine;
+}
+
+function extractGoogleErrorSummary_(rawMessage) {
+  const marker = 'Google campaigns mutate failed';
+  if (rawMessage.indexOf(marker) === -1 && rawMessage.indexOf('Google campaignBudgets mutate failed') === -1) {
+    return '';
+  }
+
+  try {
+    const jsonStart = rawMessage.indexOf('{');
+    if (jsonStart === -1) return '';
+    const parsed = JSON.parse(rawMessage.slice(jsonStart));
+    const err = parsed && parsed.error ? parsed.error : {};
+    const details = Array.isArray(err.details) ? err.details : [];
+    const firstDetail = details.length ? details[0] : {};
+    const firstError = firstDetail && Array.isArray(firstDetail.errors) && firstDetail.errors.length
+      ? firstDetail.errors[0]
+      : {};
+    const code = err.code ? String(err.code) : '';
+    const status = err.status ? String(err.status) : '';
+    const message = firstError.message || err.message || 'Google Ads mutate failed';
+    const trigger = firstError.trigger && firstError.trigger.stringValue
+      ? ' (trigger: ' + firstError.trigger.stringValue + ')'
+      : '';
+    return [code, status, message + trigger].filter(Boolean).join(' | ');
+  } catch (_e) {
+    return '';
+  }
 }

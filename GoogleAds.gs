@@ -292,19 +292,24 @@ function mapCampaignEnabledRow_(row) {
   ];
 }
 
-function executeGoogleDashboardAction_(campaignId, action) {
+function executeGoogleDashboardAction_(campaignId, action, impressionPacePct) {
   const normalizedAction = String(action || '').trim();
+  const impPace = toNumber_(impressionPacePct);
 
   if (normalizedAction === 'Increase budget') {
-    const info = mutateGoogleCampaignBudgetByFactor_(campaignId, 1.1);
+    const factor = calculateProportionalBudgetFactor_(impPace, 'increase');
+    const info = mutateGoogleCampaignBudgetByFactor_(campaignId, factor);
+    const pct = Math.round((factor - 1) * 100);
     log_('Google action applied', 'campaign_id=' + campaignId + '; action=Increase budget; new=' + info.newAmountMicros);
-    return 'Increased budget +10%';
+    return 'Increased budget +' + pct + '% (pace=' + impPace.toFixed(2) + ')';
   }
 
   if (normalizedAction === 'Decrease budget') {
-    const info = mutateGoogleCampaignBudgetByFactor_(campaignId, 0.9);
+    const factor = calculateProportionalBudgetFactor_(impPace, 'decrease');
+    const info = mutateGoogleCampaignBudgetByFactor_(campaignId, factor);
+    const pct = Math.round((1 - factor) * 100);
     log_('Google action applied', 'campaign_id=' + campaignId + '; action=Decrease budget; new=' + info.newAmountMicros);
-    return 'Decreased budget -10%';
+    return 'Decreased budget -' + pct + '% (pace=' + impPace.toFixed(2) + ')';
   }
 
   if (normalizedAction === 'Increase frequency cap') {
@@ -313,7 +318,7 @@ function executeGoogleDashboardAction_(campaignId, action) {
       'Google action applied',
       'campaign_id=' + campaignId + '; action=Increase frequency cap; old=' + info.oldCap + '; new=' + info.newCap
     );
-    return 'Frequency cap increased (' + info.oldCap + ' -> ' + info.newCap + ')';
+    return 'Frequency cap increased (' + info.oldCap + ' -> ' + info.newCap + '; ' + info.keyUsed + ')';
   }
 
   if (normalizedAction === 'Decrease frequency cap') {
@@ -322,7 +327,7 @@ function executeGoogleDashboardAction_(campaignId, action) {
       'Google action applied',
       'campaign_id=' + campaignId + '; action=Decrease frequency cap; old=' + info.oldCap + '; new=' + info.newCap
     );
-    return 'Frequency cap decreased (' + info.oldCap + ' -> ' + info.newCap + ')';
+    return 'Frequency cap decreased (' + info.oldCap + ' -> ' + info.newCap + '; ' + info.keyUsed + ')';
   }
 
   if (normalizedAction === 'Expand reach') {
@@ -334,6 +339,25 @@ function executeGoogleDashboardAction_(campaignId, action) {
   }
 
   return 'No automation rule for action: ' + normalizedAction;
+}
+
+function calculateProportionalBudgetFactor_(impressionPacePct, direction) {
+  const pace = toNumber_(impressionPacePct);
+  if (pace <= 0) {
+    return direction === 'increase' ? 1.5 : 0.7;
+  }
+
+  let factor = 1;
+  if (direction === 'increase') {
+    // If pace is 0.70 (30% behind), increase budget by ~30% => factor 1.30.
+    factor = 1 + (1 - pace);
+  } else {
+    // If pace is 1.30 (30% ahead), decrease budget by ~30% => factor 0.70.
+    factor = 1 - (pace - 1);
+  }
+
+  // Keep changes practical and safe.
+  return Math.max(0.5, Math.min(1.8, factor));
 }
 
 function mutateGoogleCampaignBudgetByFactor_(campaignId, factor) {
@@ -353,21 +377,28 @@ function mutateGoogleCampaignBudgetByFactor_(campaignId, factor) {
 
   const chunks = googleAdsSearchStream_(query);
   let budgetResourceName = '';
-  let currentAmountMicros = 0;
+  let currentAmountMicros = null;
 
   chunks.forEach(function (chunk) {
     (chunk.results || []).forEach(function (row) {
       budgetResourceName = row.campaign && row.campaign.campaignBudget
         ? String(row.campaign.campaignBudget)
         : '';
-      currentAmountMicros = row.campaignBudget && row.campaignBudget.amountMicros
+      currentAmountMicros = row.campaignBudget && row.campaignBudget.amountMicros !== undefined
         ? toNumber_(row.campaignBudget.amountMicros)
-        : 0;
+        : null;
     });
   });
 
-  if (!budgetResourceName || currentAmountMicros <= 0) {
+  if (!budgetResourceName) {
     throw new Error('Could not resolve campaign budget for campaign_id=' + safeCampaignId);
+  }
+
+  if (currentAmountMicros === null) {
+    currentAmountMicros = getGoogleCampaignBudgetAmountMicros_(budgetResourceName);
+  }
+  if (currentAmountMicros === null) {
+    throw new Error('Could not resolve campaign budget amount for campaign_id=' + safeCampaignId);
   }
 
   const newAmountMicros = Math.max(1000000, Math.round(currentAmountMicros * factor));
@@ -478,13 +509,60 @@ function mutateGoogleCampaignFrequencyCap_(campaignId, direction) {
     throw new Error('Could not resolve campaign resource name for campaign_id=' + safeCampaignId);
   }
 
-  const targetKey = {
-    level: 'CAMPAIGN',
-    eventType: 'IMPRESSION',
-    timeUnit: 'DAY',
-    timeLength: 1
-  };
+  const channelType = getGoogleCampaignChannelType_(safeCampaignId);
+  const candidateKeys = buildFrequencyCapTargetKeys_(channelType);
+  let lastError = null;
 
+  for (let i = 0; i < candidateKeys.length; i++) {
+    const targetKey = candidateKeys[i];
+    try {
+      const prepared = buildUpdatedFrequencyCaps_(frequencyCaps, targetKey, direction);
+      googleAdsMutateCampaigns_({
+        operations: [{
+          update: {
+            resourceName: campaignResourceName,
+            frequencyCaps: prepared.updatedCaps
+          },
+          updateMask: 'frequency_caps'
+        }]
+      }, {
+        action: direction === 'increase' ? 'Increase frequency cap' : 'Decrease frequency cap',
+        entityLevel: 'campaign',
+        entityId: safeCampaignId,
+        resourceName: campaignResourceName
+      });
+
+      return {
+        oldCap: prepared.oldCap,
+        newCap: prepared.newCap,
+        keyUsed: targetKey.level + ':' + targetKey.eventType + ':' + targetKey.timeUnit + ':' + targetKey.timeLength
+      };
+    } catch (err) {
+      lastError = err;
+      if (!isRecoverableFrequencyCapError_(err)) {
+        throw err;
+      }
+    }
+  }
+
+  throw lastError || new Error('All frequency cap mutation strategies failed for campaign_id=' + safeCampaignId);
+}
+
+function buildFrequencyCapTargetKeys_(channelType) {
+  const c = String(channelType || '').toUpperCase();
+  if (c === 'VIDEO') {
+    return [
+      { level: 'CAMPAIGN', eventType: 'VIDEO_VIEW', timeUnit: 'DAY', timeLength: 1 },
+      { level: 'CAMPAIGN', eventType: 'IMPRESSION', timeUnit: 'DAY', timeLength: 1 },
+      { level: 'AD_GROUP', eventType: 'VIDEO_VIEW', timeUnit: 'DAY', timeLength: 1 }
+    ];
+  }
+  return [
+    { level: 'CAMPAIGN', eventType: 'IMPRESSION', timeUnit: 'DAY', timeLength: 1 }
+  ];
+}
+
+function buildUpdatedFrequencyCaps_(frequencyCaps, targetKey, direction) {
   let oldCap = 0;
   let found = false;
 
@@ -513,7 +591,7 @@ function mutateGoogleCampaignFrequencyCap_(campaignId, direction) {
   });
 
   if (!found) {
-    oldCap = direction === 'increase' ? 2 : 2;
+    oldCap = 2;
     const newCap = direction === 'increase' ? 3 : 1;
     updatedCaps.push({
       key: targetKey,
@@ -526,25 +604,62 @@ function mutateGoogleCampaignFrequencyCap_(campaignId, direction) {
     throw new Error('Failed to prepare updated frequency cap payload.');
   }
 
-  googleAdsMutateCampaigns_({
-    operations: [{
-      update: {
-        resourceName: campaignResourceName,
-        frequencyCaps: updatedCaps
-      },
-      updateMask: 'frequency_caps'
-    }]
-  }, {
-    action: direction === 'increase' ? 'Increase frequency cap' : 'Decrease frequency cap',
-    entityLevel: 'campaign',
-    entityId: safeCampaignId,
-    resourceName: campaignResourceName
-  });
-
   return {
+    updatedCaps: updatedCaps,
     oldCap: oldCap,
     newCap: toNumber_(currentTarget.cap)
   };
+}
+
+function isRecoverableFrequencyCapError_(err) {
+  const message = String((err && err.message) || err || '').toUpperCase();
+  return (
+    message.indexOf('INVALID_ARGUMENT') !== -1 ||
+    message.indexOf('MUTATE_NOT_ALLOWED') !== -1 ||
+    message.indexOf('OPERATION_NOT_PERMITTED_FOR_CONTEXT') !== -1
+  );
+}
+
+function getGoogleCampaignChannelType_(campaignId) {
+  const safeCampaignId = normalizeId_(campaignId).replace(/-/g, '');
+  const query = [
+    'SELECT',
+    '  campaign.advertising_channel_type',
+    'FROM campaign',
+    'WHERE campaign.id = ' + safeCampaignId
+  ].join('\n');
+
+  const chunks = googleAdsSearchStream_(query);
+  let channelType = '';
+  chunks.forEach(function (chunk) {
+    (chunk.results || []).forEach(function (row) {
+      channelType = row.campaign && row.campaign.advertisingChannelType
+        ? String(row.campaign.advertisingChannelType)
+        : channelType;
+    });
+  });
+  return channelType;
+}
+
+function getGoogleCampaignBudgetAmountMicros_(budgetResourceName) {
+  if (!budgetResourceName) return null;
+  const query = [
+    'SELECT',
+    '  campaign_budget.amount_micros',
+    'FROM campaign_budget',
+    "WHERE campaign_budget.resource_name = '" + budgetResourceName + "'"
+  ].join('\n');
+
+  const chunks = googleAdsSearchStream_(query);
+  let amount = null;
+  chunks.forEach(function (chunk) {
+    (chunk.results || []).forEach(function (row) {
+      if (row.campaignBudget && row.campaignBudget.amountMicros !== undefined) {
+        amount = toNumber_(row.campaignBudget.amountMicros);
+      }
+    });
+  });
+  return amount;
 }
 
 function findFrequencyCapByKey_(caps, key) {
