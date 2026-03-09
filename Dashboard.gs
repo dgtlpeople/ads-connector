@@ -5,7 +5,9 @@ function buildDashboard() {
     const sh = getSheet_(SHEETS.DASHBOARD);
     sh.clear();
     sh.clearConditionalFormatRules();
-    sh.clearCharts();
+    sh.getCharts().forEach(function (chart) {
+      sh.removeChart(chart);
+    });
     sh.setHiddenGridlines(true);
 
     const rows = readObjects_(SHEETS.SUMMARY);
