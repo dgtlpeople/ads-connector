@@ -245,13 +245,13 @@ function generateVideoQueueAdsScript_() {
     "    }",
     "  }",
     "}"
-  ].join('\\n');
+  ].join('\n');
 
   const sh = getSheet_('ADS_SCRIPT_TEMPLATE');
   sh.clear();
-  sh.getRange(1, 1).setValue('Paste into Google Ads Script (Tools & Settings > Bulk Actions > Scripts):');
-  sh.getRange(2, 1).setValue(script);
-  sh.getRange(2, 1).setWrap(true);
+  sh.getRange(1, 1).setValue(script);
+  sh.getRange(1, 1).setWrap(true);
+  sh.getRange(2, 1).setValue('Copy only cell A1 into Google Ads Script.');
   sh.setColumnWidth(1, 1200);
-  sh.setRowHeight(2, 900);
+  sh.setRowHeight(1, 900);
 }
