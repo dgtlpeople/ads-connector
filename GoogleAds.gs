@@ -313,6 +313,27 @@ function executeGoogleDashboardAction_(campaignId, action, impressionPacePct) {
   }
 
   if (normalizedAction === 'Increase frequency cap') {
+    const channelType = getGoogleCampaignChannelType_(campaignId);
+    if (!isFrequencyCapSupportedForChannel_(channelType)) {
+      const safeCampaignId = normalizeId_(campaignId).replace(/-/g, '');
+      const campaignName = getGoogleCampaignName_(safeCampaignId);
+      const actionId = enqueueVideoAction_({
+        campaign_id: safeCampaignId,
+        campaign_name: campaignName,
+        action: 'Increase frequency cap',
+        detail: 'Queued because channel type=' + channelType + ' is not mutable via Google Ads API'
+      });
+      logGoogleChange_({
+        action: 'Increase frequency cap',
+        entity_level: 'campaign',
+        entity_id: safeCampaignId,
+        resource_name: '',
+        status: 'QUEUED',
+        request_payload: '',
+        response_or_error: 'Queued for Google Ads Script. channel type=' + channelType
+      });
+      return 'Queued for Ads Script [' + actionId + ']: frequency cap on ' + channelType;
+    }
     let info = null;
     try {
       info = mutateGoogleCampaignFrequencyCap_(campaignId, 'increase');
@@ -330,6 +351,27 @@ function executeGoogleDashboardAction_(campaignId, action, impressionPacePct) {
   }
 
   if (normalizedAction === 'Decrease frequency cap') {
+    const channelType = getGoogleCampaignChannelType_(campaignId);
+    if (!isFrequencyCapSupportedForChannel_(channelType)) {
+      const safeCampaignId = normalizeId_(campaignId).replace(/-/g, '');
+      const campaignName = getGoogleCampaignName_(safeCampaignId);
+      const actionId = enqueueVideoAction_({
+        campaign_id: safeCampaignId,
+        campaign_name: campaignName,
+        action: 'Decrease frequency cap',
+        detail: 'Queued because channel type=' + channelType + ' is not mutable via Google Ads API'
+      });
+      logGoogleChange_({
+        action: 'Decrease frequency cap',
+        entity_level: 'campaign',
+        entity_id: safeCampaignId,
+        resource_name: '',
+        status: 'QUEUED',
+        request_payload: '',
+        response_or_error: 'Queued for Google Ads Script. channel type=' + channelType
+      });
+      return 'Queued for Ads Script [' + actionId + ']: frequency cap on ' + channelType;
+    }
     let info = null;
     try {
       info = mutateGoogleCampaignFrequencyCap_(campaignId, 'decrease');
@@ -639,6 +681,9 @@ function mutateGoogleCampaignFrequencyCap_(campaignId, direction) {
     }
   }
 
+  if (lastError && isRecoverableFrequencyCapError_(lastError)) {
+    throw new Error('Frequency capping mutate not permitted for this campaign context');
+  }
   throw lastError || new Error('All frequency cap mutation strategies failed for campaign_id=' + safeCampaignId);
 }
 
@@ -713,6 +758,17 @@ function isRecoverableFrequencyCapError_(err) {
   );
 }
 
+function isFrequencyCapSupportedForChannel_(channelType) {
+  const c = String(channelType || '').toUpperCase();
+  if (!c) return true;
+  const unsupported = {
+    VIDEO: true,
+    PERFORMANCE_MAX: true,
+    SMART: true
+  };
+  return !unsupported[c];
+}
+
 function getGoogleCampaignChannelType_(campaignId) {
   const safeCampaignId = normalizeId_(campaignId).replace(/-/g, '');
   const query = [
@@ -767,6 +823,26 @@ function getGoogleCampaignBudgetAmounts_(budgetResourceName) {
     totalAmountMicros: totalAmount,
     type: type
   };
+}
+
+function getGoogleCampaignName_(campaignId) {
+  const safeCampaignId = normalizeId_(campaignId).replace(/-/g, '');
+  if (!/^\d+$/.test(safeCampaignId)) return '';
+  const query = [
+    'SELECT',
+    '  campaign.name',
+    'FROM campaign',
+    'WHERE campaign.id = ' + safeCampaignId
+  ].join('\n');
+
+  const chunks = googleAdsSearchStream_(query);
+  let name = '';
+  chunks.forEach(function (chunk) {
+    (chunk.results || []).forEach(function (row) {
+      name = row.campaign && row.campaign.name ? String(row.campaign.name) : name;
+    });
+  });
+  return name;
 }
 
 function findFrequencyCapByKey_(caps, key) {

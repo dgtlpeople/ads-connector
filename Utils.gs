@@ -145,3 +145,113 @@ function logGoogleChange_(entry) {
     entry.response_or_error || ''
   ]]);
 }
+
+function enqueueVideoAction_(entry) {
+  ensureHeader_(SHEETS.VIDEO_ACTION_QUEUE, HEADERS.VIDEO_ACTION_QUEUE);
+  const existingId = findExistingQueuedVideoAction_(entry.campaign_id, entry.action);
+  if (existingId) {
+    return existingId;
+  }
+
+  const actionId = Utilities.getUuid();
+  appendRows_(SHEETS.VIDEO_ACTION_QUEUE, [[
+    new Date(),
+    actionId,
+    'QUEUED',
+    'google',
+    entry.campaign_id || '',
+    entry.campaign_name || '',
+    entry.action || '',
+    entry.requested_by || Session.getActiveUser().getEmail() || '',
+    entry.detail || '',
+    0,
+    '',
+    '',
+    ''
+  ]]);
+  return actionId;
+}
+
+function findExistingQueuedVideoAction_(campaignId, action) {
+  const rows = readObjects_(SHEETS.VIDEO_ACTION_QUEUE);
+  const targetCampaignId = normalizeId_(campaignId).replace(/-/g, '');
+  const targetAction = String(action || '').trim();
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const status = String(r.status || '').toUpperCase();
+    if (status !== 'QUEUED' && status !== 'PROCESSING') continue;
+    if (normalizeId_(r.campaign_id).replace(/-/g, '') !== targetCampaignId) continue;
+    if (String(r.action || '').trim() !== targetAction) continue;
+    return String(r.action_id || '');
+  }
+  return '';
+}
+
+function generateVideoQueueAdsScript_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const script = [
+    "function main() {",
+    "  var MAX_ATTEMPTS = 5;",
+    "  var SPREADSHEET_URL = '" + ss.getUrl() + "';",
+    "  var SHEET_NAME = 'VIDEO_ACTION_QUEUE';",
+    "  var sh = SpreadsheetApp.openByUrl(SPREADSHEET_URL).getSheetByName(SHEET_NAME);",
+    "  if (!sh) return;",
+    "  var values = sh.getDataRange().getValues();",
+    "  if (values.length < 2) return;",
+    "  var headers = values[0];",
+    "  var idx = {};",
+    "  for (var h = 0; h < headers.length; h++) idx[String(headers[h])] = h;",
+    "  function col(name) { return (idx[name] || 0) + 1; }",
+    "  for (var i = 1; i < values.length; i++) {",
+    "    var row = values[i];",
+    "    var status = String(row[idx.status] || '').toUpperCase();",
+    "    var attempts = Number(row[idx.attempts] || 0);",
+    "    if (status !== 'QUEUED' && status !== 'ERROR') continue;",
+    "    if (attempts >= MAX_ATTEMPTS) continue;",
+    "    var campaignId = String(row[idx.campaign_id] || '');",
+    "    var action = String(row[idx.action] || '');",
+    "    sh.getRange(i + 1, col('status')).setValue('PROCESSING');",
+    "    sh.getRange(i + 1, col('attempts')).setValue(attempts + 1);",
+    "    sh.getRange(i + 1, col('processed_at')).setValue(new Date());",
+    "    sh.getRange(i + 1, col('last_error')).setValue('');",
+    "    SpreadsheetApp.flush();",
+    "    try {",
+    "      var it = AdsApp.videoCampaigns().withIds([campaignId]).get();",
+    "      if (!it.hasNext()) throw new Error('Campaign not found');",
+    "      var c = it.next();",
+    "      var caps = c.getFrequencyCaps();",
+    "      var eventType = 'IMPRESSION';",
+    "      var timeUnit = 'MONTH';",
+    "      var currentCap = caps.getFrequencyCapFor(eventType, timeUnit);",
+    "      var currentLimit = currentCap ? Number(currentCap.getLimit()) : 2;",
+    "      var nextLimit = action === 'Increase frequency cap'",
+    "        ? Math.min(100, currentLimit + 1)",
+    "        : Math.max(1, currentLimit - 1);",
+    "      caps.removeFrequencyCapFor(eventType, timeUnit);",
+    "      caps.newFrequencyCapBuilder()",
+    "        .withEventType(eventType)",
+    "        .withTimeUnit(timeUnit)",
+    "        .withLimit(nextLimit)",
+    "        .build();",
+    "      sh.getRange(i + 1, col('status')).setValue('DONE');",
+    "      sh.getRange(i + 1, col('processed_at')).setValue(new Date());",
+    "      sh.getRange(i + 1, col('result')).setValue('Applied: ' + currentLimit + ' -> ' + nextLimit + ' / ' + timeUnit);",
+    "      sh.getRange(i + 1, col('last_error')).setValue('');",
+    "    } catch (e) {",
+    "      sh.getRange(i + 1, col('status')).setValue('ERROR');",
+    "      sh.getRange(i + 1, col('processed_at')).setValue(new Date());",
+    "      sh.getRange(i + 1, col('last_error')).setValue(String(e));",
+    "      sh.getRange(i + 1, col('result')).setValue('');",
+    "    }",
+    "  }",
+    "}"
+  ].join('\\n');
+
+  const sh = getSheet_('ADS_SCRIPT_TEMPLATE');
+  sh.clear();
+  sh.getRange(1, 1).setValue('Paste into Google Ads Script (Tools & Settings > Bulk Actions > Scripts):');
+  sh.getRange(2, 1).setValue(script);
+  sh.getRange(2, 1).setWrap(true);
+  sh.setColumnWidth(1, 1200);
+  sh.setRowHeight(2, 900);
+}

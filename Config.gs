@@ -6,7 +6,8 @@ const SHEETS = {
   LOG: 'LOG',
   REACH_CACHE: 'REACH_CACHE',
   DASHBOARD: 'DASHBOARD',
-  GOOGLE_CHANGES_LOG: 'GOOGLE_CHANGES_LOG'
+  GOOGLE_CHANGES_LOG: 'GOOGLE_CHANGES_LOG',
+  VIDEO_ACTION_QUEUE: 'VIDEO_ACTION_QUEUE'
 };
 
 const HEADERS = {
@@ -103,6 +104,21 @@ const HEADERS = {
     'status',
     'request_payload',
     'response_or_error'
+  ],
+  VIDEO_ACTION_QUEUE: [
+    'timestamp',
+    'action_id',
+    'status',
+    'platform',
+    'campaign_id',
+    'campaign_name',
+    'action',
+    'requested_by',
+    'detail',
+    'attempts',
+    'processed_at',
+    'result',
+    'last_error'
   ],
   REACH_CACHE: [
     'platform',

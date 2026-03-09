@@ -12,6 +12,7 @@ function onOpen() {
     .addItem('Refresh RAW_ALL from PLAN (Meta)', 'refreshRawAllFromPlanMeta')
     .addItem('Build SUMMARY', 'buildSummary')
     .addItem('Build DASHBOARD', 'buildDashboard')
+    .addItem('Generate VIDEO Ads Script', 'generateVideoAdsScript')
     .addItem('Setup Dashboard Action Trigger', 'setupDashboardActionTrigger')
     .addItem('Run full pipeline', 'runFullPipeline')
     .addToUi();
@@ -34,6 +35,7 @@ function setupSheets() {
     ensureHeader_(SHEETS.SUMMARY, HEADERS.SUMMARY);
     ensureHeader_(SHEETS.LOG, HEADERS.LOG);
     ensureHeader_(SHEETS.GOOGLE_CHANGES_LOG, HEADERS.GOOGLE_CHANGES_LOG);
+    ensureHeader_(SHEETS.VIDEO_ACTION_QUEUE, HEADERS.VIDEO_ACTION_QUEUE);
     ensureHeader_(SHEETS.REACH_CACHE, HEADERS.REACH_CACHE);
     ensureReachCacheSampleRow_();
     SpreadsheetApp.getUi().alert('Sheets created/validated.');
@@ -111,5 +113,12 @@ function setupDashboardActionTrigger() {
     }
 
     SpreadsheetApp.getUi().alert('Dashboard action trigger is configured.');
+  });
+}
+
+function generateVideoAdsScript() {
+  withErrorLogging_('generateVideoAdsScript failed', function () {
+    generateVideoQueueAdsScript_();
+    SpreadsheetApp.getUi().alert('VIDEO Ads Script template generated in ADS_SCRIPT_TEMPLATE sheet.');
   });
 }
