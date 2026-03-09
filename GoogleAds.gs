@@ -199,7 +199,7 @@ function fetchGoogleEntityMetrics_(entity) {
   const impressions = toNumber_(selected.impressions);
 
   if (uniqueUsersFetchSucceeded && selected.uniqueUsers !== undefined && selected.uniqueUsers !== '') {
-    upsertGoogleReachCache_(campaignId, reach);
+    upsertGoogleReachCache_(campaignId, selected.name || normalizeId_(entity.entity_name), reach);
   } else {
     const cachedReach = getCachedGoogleReach_(campaignId);
     if (cachedReach !== null) {
@@ -308,12 +308,12 @@ function getCachedGoogleReach_(campaignId) {
   return null;
 }
 
-function upsertGoogleReachCache_(campaignId, reach) {
+function upsertGoogleReachCache_(campaignId, entityName, reach) {
   ensureHeader_(SHEETS.REACH_CACHE, HEADERS.REACH_CACHE);
   const sh = getSheet_(SHEETS.REACH_CACHE);
   const lastRow = sh.getLastRow();
   const safeCampaignId = normalizeId_(campaignId).replace(/-/g, '');
-  const rowData = ['google', '', 'campaign', safeCampaignId, toNumber_(reach), new Date()];
+  const rowData = ['google', '', 'campaign', safeCampaignId, entityName || '', toNumber_(reach), new Date()];
 
   if (lastRow <= 1) {
     sh.getRange(2, 1, 1, rowData.length).setValues([rowData]);

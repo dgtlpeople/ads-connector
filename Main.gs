@@ -24,6 +24,7 @@ function setupSheets() {
     ensureHeader_(SHEETS.SUMMARY, HEADERS.SUMMARY);
     ensureHeader_(SHEETS.LOG, HEADERS.LOG);
     ensureHeader_(SHEETS.REACH_CACHE, HEADERS.REACH_CACHE);
+    ensureReachCacheSampleRow_();
     SpreadsheetApp.getUi().alert('Sheets created/validated.');
   });
 }

@@ -115,3 +115,19 @@ function sortCampaignsEnabled_() {
     { column: 5, ascending: true }  // entity_name
   ]);
 }
+
+function ensureReachCacheSampleRow_() {
+  ensureHeader_(SHEETS.REACH_CACHE, HEADERS.REACH_CACHE);
+  const sh = getSheet_(SHEETS.REACH_CACHE);
+  if (sh.getLastRow() > 1) return;
+
+  sh.getRange(2, 1, 1, HEADERS.REACH_CACHE.length).setValues([[
+    'google',
+    '',
+    'campaign',
+    '1234567890',
+    'Sample Campaign',
+    250000,
+    new Date()
+  ]]);
+}

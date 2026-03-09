@@ -98,6 +98,7 @@ const HEADERS = {
     'account_id',
     'entity_level',
     'entity_id',
+    'entity_name',
     'reach',
     'last_success_at'
   ]
