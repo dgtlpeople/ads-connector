@@ -37,7 +37,7 @@ function buildSummary() {
       const impressionPacePct = expectedImpressionsToDate > 0 ? impressions / expectedImpressionsToDate : 0;
       const reachPacePct = expectedReachToDate > 0 ? reach / expectedReachToDate : 0;
 
-      const action = recommendAction_(impressionPacePct, reachPacePct);
+      const action = recommendAction_(impressionPacePct, reachPacePct, toNumber_(r.frequency));
 
       return [
         r.platform || '',
@@ -80,14 +80,15 @@ function buildSummary() {
   });
 }
 
-function recommendAction_(impressionPacePct, reachPacePct) {
+function recommendAction_(impressionPacePct, reachPacePct, frequency) {
   const imp = toNumber_(impressionPacePct);
   const reach = toNumber_(reachPacePct);
+  const freq = toNumber_(frequency);
 
   if (imp < 0.9) return 'Increase budget';
   if (imp > 1.5) return 'Decrease budget';
   if (reach >= 1 && imp < 1) return 'Increase frequency cap';
-  if (imp > 1 && reach < 0.9) return 'Expand reach';
+  if (imp > 1 && reach < 0.9) return freq >= 3 ? 'Decrease frequency cap' : 'Expand reach';
   if (imp >= 0.95 && imp <= 1.1 && reach >= 0.95 && reach <= 1.1) return 'On track';
   return 'Monitor';
 }

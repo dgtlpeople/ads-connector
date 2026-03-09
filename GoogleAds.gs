@@ -292,6 +292,330 @@ function mapCampaignEnabledRow_(row) {
   ];
 }
 
+function executeGoogleDashboardAction_(campaignId, action) {
+  const normalizedAction = String(action || '').trim();
+
+  if (normalizedAction === 'Increase budget') {
+    const info = mutateGoogleCampaignBudgetByFactor_(campaignId, 1.1);
+    log_('Google action applied', 'campaign_id=' + campaignId + '; action=Increase budget; new=' + info.newAmountMicros);
+    return 'Increased budget +10%';
+  }
+
+  if (normalizedAction === 'Decrease budget') {
+    const info = mutateGoogleCampaignBudgetByFactor_(campaignId, 0.9);
+    log_('Google action applied', 'campaign_id=' + campaignId + '; action=Decrease budget; new=' + info.newAmountMicros);
+    return 'Decreased budget -10%';
+  }
+
+  if (normalizedAction === 'Increase frequency cap') {
+    const info = mutateGoogleCampaignFrequencyCap_(campaignId, 'increase');
+    log_(
+      'Google action applied',
+      'campaign_id=' + campaignId + '; action=Increase frequency cap; old=' + info.oldCap + '; new=' + info.newCap
+    );
+    return 'Frequency cap increased (' + info.oldCap + ' -> ' + info.newCap + ')';
+  }
+
+  if (normalizedAction === 'Decrease frequency cap') {
+    const info = mutateGoogleCampaignFrequencyCap_(campaignId, 'decrease');
+    log_(
+      'Google action applied',
+      'campaign_id=' + campaignId + '; action=Decrease frequency cap; old=' + info.oldCap + '; new=' + info.newCap
+    );
+    return 'Frequency cap decreased (' + info.oldCap + ' -> ' + info.newCap + ')';
+  }
+
+  if (normalizedAction === 'Expand reach') {
+    return 'Not automated: expand reach requires strategy-specific changes';
+  }
+
+  if (normalizedAction === 'On track' || normalizedAction === 'Monitor') {
+    return 'No action needed';
+  }
+
+  return 'No automation rule for action: ' + normalizedAction;
+}
+
+function mutateGoogleCampaignBudgetByFactor_(campaignId, factor) {
+  const safeCampaignId = normalizeId_(campaignId).replace(/-/g, '');
+  if (!/^\d+$/.test(safeCampaignId)) {
+    throw new Error('Invalid campaign ID for budget mutate: ' + campaignId);
+  }
+
+  const query = [
+    'SELECT',
+    '  campaign.id,',
+    '  campaign.campaign_budget,',
+    '  campaign_budget.amount_micros',
+    'FROM campaign',
+    'WHERE campaign.id = ' + safeCampaignId
+  ].join('\n');
+
+  const chunks = googleAdsSearchStream_(query);
+  let budgetResourceName = '';
+  let currentAmountMicros = 0;
+
+  chunks.forEach(function (chunk) {
+    (chunk.results || []).forEach(function (row) {
+      budgetResourceName = row.campaign && row.campaign.campaignBudget
+        ? String(row.campaign.campaignBudget)
+        : '';
+      currentAmountMicros = row.campaignBudget && row.campaignBudget.amountMicros
+        ? toNumber_(row.campaignBudget.amountMicros)
+        : 0;
+    });
+  });
+
+  if (!budgetResourceName || currentAmountMicros <= 0) {
+    throw new Error('Could not resolve campaign budget for campaign_id=' + safeCampaignId);
+  }
+
+  const newAmountMicros = Math.max(1000000, Math.round(currentAmountMicros * factor));
+
+  googleAdsMutateCampaignBudgets_({
+    operations: [{
+      update: {
+        resourceName: budgetResourceName,
+        amountMicros: String(newAmountMicros)
+      },
+      updateMask: 'amount_micros'
+    }]
+  }, {
+    action: factor >= 1 ? 'Increase budget' : 'Decrease budget',
+    entityLevel: 'campaign',
+    entityId: safeCampaignId,
+    resourceName: budgetResourceName
+  });
+
+  return {
+    budgetResourceName: budgetResourceName,
+    currentAmountMicros: currentAmountMicros,
+    newAmountMicros: newAmountMicros
+  };
+}
+
+function googleAdsMutateCampaignBudgets_(payload, meta) {
+  const cfg = getGoogleAdsConfig_();
+  const token = getGoogleAccessToken_();
+  const url = 'https://googleads.googleapis.com/v20/customers/' + cfg.customerId + '/campaignBudgets:mutate';
+
+  const headers = {
+    Authorization: 'Bearer ' + token,
+    'developer-token': cfg.developerToken,
+    'Content-Type': 'application/json'
+  };
+
+  if (isConfigured_(cfg.loginCustomerId)) {
+    headers['login-customer-id'] = cfg.loginCustomerId;
+  }
+
+  const requestPayload = JSON.stringify(payload);
+  const baseMeta = meta || {};
+  const res = UrlFetchApp.fetch(url, {
+    method: 'post',
+    headers: headers,
+    payload: requestPayload,
+    muteHttpExceptions: true
+  });
+
+  const code = res.getResponseCode();
+  const body = res.getContentText();
+  if (code < 200 || code >= 300) {
+    logGoogleChange_({
+      action: baseMeta.action || 'Google campaignBudgets mutate',
+      entity_level: baseMeta.entityLevel || 'campaign',
+      entity_id: baseMeta.entityId || '',
+      resource_name: baseMeta.resourceName || '',
+      status: 'ERROR',
+      request_payload: requestPayload,
+      response_or_error: 'HTTP ' + code + ': ' + body
+    });
+    throw new Error('Google campaignBudgets mutate failed ' + code + ': ' + body);
+  }
+
+  logGoogleChange_({
+    action: baseMeta.action || 'Google campaignBudgets mutate',
+    entity_level: baseMeta.entityLevel || 'campaign',
+    entity_id: baseMeta.entityId || '',
+    resource_name: baseMeta.resourceName || '',
+    status: 'SUCCESS',
+    request_payload: requestPayload,
+    response_or_error: body
+  });
+
+  return JSON.parse(body);
+}
+
+function mutateGoogleCampaignFrequencyCap_(campaignId, direction) {
+  const safeCampaignId = normalizeId_(campaignId).replace(/-/g, '');
+  if (!/^\d+$/.test(safeCampaignId)) {
+    throw new Error('Invalid campaign ID for frequency cap mutate: ' + campaignId);
+  }
+
+  const query = [
+    'SELECT',
+    '  campaign.resource_name,',
+    '  campaign.frequency_caps',
+    'FROM campaign',
+    'WHERE campaign.id = ' + safeCampaignId
+  ].join('\n');
+
+  const chunks = googleAdsSearchStream_(query);
+  let campaignResourceName = '';
+  let frequencyCaps = [];
+
+  chunks.forEach(function (chunk) {
+    (chunk.results || []).forEach(function (row) {
+      const campaign = row.campaign || {};
+      campaignResourceName = campaign.resourceName || campaignResourceName;
+      if (Array.isArray(campaign.frequencyCaps)) {
+        frequencyCaps = campaign.frequencyCaps;
+      }
+    });
+  });
+
+  if (!campaignResourceName) {
+    throw new Error('Could not resolve campaign resource name for campaign_id=' + safeCampaignId);
+  }
+
+  const targetKey = {
+    level: 'CAMPAIGN',
+    eventType: 'IMPRESSION',
+    timeUnit: 'DAY',
+    timeLength: 1
+  };
+
+  let oldCap = 0;
+  let found = false;
+
+  const updatedCaps = frequencyCaps.map(function (capEntry) {
+    const key = (capEntry && capEntry.key) || {};
+    const isTarget =
+      String(key.level || '') === targetKey.level &&
+      String(key.eventType || '') === targetKey.eventType &&
+      String(key.timeUnit || '') === targetKey.timeUnit &&
+      toNumber_(key.timeLength) === targetKey.timeLength;
+
+    if (!isTarget) {
+      return capEntry;
+    }
+
+    found = true;
+    oldCap = Math.max(1, toNumber_(capEntry.cap));
+    const nextCap = direction === 'increase'
+      ? Math.min(100, oldCap + 1)
+      : Math.max(1, oldCap - 1);
+
+    return {
+      key: targetKey,
+      cap: nextCap
+    };
+  });
+
+  if (!found) {
+    oldCap = direction === 'increase' ? 2 : 2;
+    const newCap = direction === 'increase' ? 3 : 1;
+    updatedCaps.push({
+      key: targetKey,
+      cap: newCap
+    });
+  }
+
+  const currentTarget = findFrequencyCapByKey_(updatedCaps, targetKey);
+  if (!currentTarget) {
+    throw new Error('Failed to prepare updated frequency cap payload.');
+  }
+
+  googleAdsMutateCampaigns_({
+    operations: [{
+      update: {
+        resourceName: campaignResourceName,
+        frequencyCaps: updatedCaps
+      },
+      updateMask: 'frequency_caps'
+    }]
+  }, {
+    action: direction === 'increase' ? 'Increase frequency cap' : 'Decrease frequency cap',
+    entityLevel: 'campaign',
+    entityId: safeCampaignId,
+    resourceName: campaignResourceName
+  });
+
+  return {
+    oldCap: oldCap,
+    newCap: toNumber_(currentTarget.cap)
+  };
+}
+
+function findFrequencyCapByKey_(caps, key) {
+  if (!Array.isArray(caps)) return null;
+  for (let i = 0; i < caps.length; i++) {
+    const entry = caps[i] || {};
+    const k = entry.key || {};
+    if (
+      String(k.level || '') === key.level &&
+      String(k.eventType || '') === key.eventType &&
+      String(k.timeUnit || '') === key.timeUnit &&
+      toNumber_(k.timeLength) === toNumber_(key.timeLength)
+    ) {
+      return entry;
+    }
+  }
+  return null;
+}
+
+function googleAdsMutateCampaigns_(payload, meta) {
+  const cfg = getGoogleAdsConfig_();
+  const token = getGoogleAccessToken_();
+  const url = 'https://googleads.googleapis.com/v20/customers/' + cfg.customerId + '/campaigns:mutate';
+
+  const headers = {
+    Authorization: 'Bearer ' + token,
+    'developer-token': cfg.developerToken,
+    'Content-Type': 'application/json'
+  };
+
+  if (isConfigured_(cfg.loginCustomerId)) {
+    headers['login-customer-id'] = cfg.loginCustomerId;
+  }
+
+  const requestPayload = JSON.stringify(payload);
+  const baseMeta = meta || {};
+  const res = UrlFetchApp.fetch(url, {
+    method: 'post',
+    headers: headers,
+    payload: requestPayload,
+    muteHttpExceptions: true
+  });
+
+  const code = res.getResponseCode();
+  const body = res.getContentText();
+  if (code < 200 || code >= 300) {
+    logGoogleChange_({
+      action: baseMeta.action || 'Google campaigns mutate',
+      entity_level: baseMeta.entityLevel || 'campaign',
+      entity_id: baseMeta.entityId || '',
+      resource_name: baseMeta.resourceName || '',
+      status: 'ERROR',
+      request_payload: requestPayload,
+      response_or_error: 'HTTP ' + code + ': ' + body
+    });
+    throw new Error('Google campaigns mutate failed ' + code + ': ' + body);
+  }
+
+  logGoogleChange_({
+    action: baseMeta.action || 'Google campaigns mutate',
+    entity_level: baseMeta.entityLevel || 'campaign',
+    entity_id: baseMeta.entityId || '',
+    resource_name: baseMeta.resourceName || '',
+    status: 'SUCCESS',
+    request_payload: requestPayload,
+    response_or_error: body
+  });
+
+  return JSON.parse(body);
+}
+
 function getCachedGoogleReach_(campaignId) {
   ensureHeader_(SHEETS.REACH_CACHE, HEADERS.REACH_CACHE);
   const cacheRows = readObjects_(SHEETS.REACH_CACHE);

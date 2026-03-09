@@ -131,3 +131,17 @@ function ensureReachCacheSampleRow_() {
     new Date()
   ]]);
 }
+
+function logGoogleChange_(entry) {
+  ensureHeader_(SHEETS.GOOGLE_CHANGES_LOG, HEADERS.GOOGLE_CHANGES_LOG);
+  appendRows_(SHEETS.GOOGLE_CHANGES_LOG, [[
+    new Date(),
+    entry.action || '',
+    entry.entity_level || '',
+    entry.entity_id || '',
+    entry.resource_name || '',
+    entry.status || '',
+    entry.request_payload || '',
+    entry.response_or_error || ''
+  ]]);
+}

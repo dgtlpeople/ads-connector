@@ -5,7 +5,8 @@ const SHEETS = {
   SUMMARY: 'SUMMARY',
   LOG: 'LOG',
   REACH_CACHE: 'REACH_CACHE',
-  DASHBOARD: 'DASHBOARD'
+  DASHBOARD: 'DASHBOARD',
+  GOOGLE_CHANGES_LOG: 'GOOGLE_CHANGES_LOG'
 };
 
 const HEADERS = {
@@ -93,6 +94,16 @@ const HEADERS = {
     'channel_type'
   ],
   LOG: ['timestamp', 'message', 'detail'],
+  GOOGLE_CHANGES_LOG: [
+    'timestamp',
+    'action',
+    'entity_level',
+    'entity_id',
+    'resource_name',
+    'status',
+    'request_payload',
+    'response_or_error'
+  ],
   REACH_CACHE: [
     'platform',
     'account_id',

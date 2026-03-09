@@ -12,8 +12,18 @@ function onOpen() {
     .addItem('Refresh RAW_ALL from PLAN (Meta)', 'refreshRawAllFromPlanMeta')
     .addItem('Build SUMMARY', 'buildSummary')
     .addItem('Build DASHBOARD', 'buildDashboard')
+    .addItem('Setup Dashboard Action Trigger', 'setupDashboardActionTrigger')
     .addItem('Run full pipeline', 'runFullPipeline')
     .addToUi();
+}
+
+function onEdit(e) {
+  if (!e || e.authMode !== ScriptApp.AuthMode.FULL) return;
+  handleDashboardActionEdit_(e);
+}
+
+function dashboardActionOnEdit(e) {
+  handleDashboardActionEdit_(e);
 }
 
 function setupSheets() {
@@ -23,6 +33,7 @@ function setupSheets() {
     ensureHeader_(SHEETS.RAW_ALL, HEADERS.RAW_ALL);
     ensureHeader_(SHEETS.SUMMARY, HEADERS.SUMMARY);
     ensureHeader_(SHEETS.LOG, HEADERS.LOG);
+    ensureHeader_(SHEETS.GOOGLE_CHANGES_LOG, HEADERS.GOOGLE_CHANGES_LOG);
     ensureHeader_(SHEETS.REACH_CACHE, HEADERS.REACH_CACHE);
     ensureReachCacheSampleRow_();
     SpreadsheetApp.getUi().alert('Sheets created/validated.');
@@ -82,5 +93,23 @@ function runFullPipeline() {
     buildSummary();
     buildDashboard();
     SpreadsheetApp.getUi().alert('Full pipeline complete.');
+  });
+}
+
+function setupDashboardActionTrigger() {
+  withErrorLogging_('setupDashboardActionTrigger failed', function () {
+    const ssId = SpreadsheetApp.getActiveSpreadsheet().getId();
+    const existing = ScriptApp.getProjectTriggers().some(function (t) {
+      return t.getHandlerFunction() === 'dashboardActionOnEdit';
+    });
+
+    if (!existing) {
+      ScriptApp.newTrigger('dashboardActionOnEdit')
+        .forSpreadsheet(ssId)
+        .onEdit()
+        .create();
+    }
+
+    SpreadsheetApp.getUi().alert('Dashboard action trigger is configured.');
   });
 }
