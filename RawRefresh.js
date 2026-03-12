@@ -36,19 +36,20 @@ function refreshRawAllFromPlan_(platform) {
     planRows.forEach(function (planRow) {
       try {
         const normalizedEntity = normalizePlanEntity_(planRow);
-        const enabledMatch = findEnabledEntityMatch_(enabledByKey, targetPlatform, normalizedEntity);
+        const enabledMatch = enabledByKey[entityKey_(
+          targetPlatform,
+          normalizedEntity.account_id,
+          normalizedEntity.entity_level,
+          normalizedEntity.entity_id
+        )] || {};
 
         const mergedEntity = mergePlanAndEnabledEntity_(normalizedEntity, enabledMatch);
-        mergedEntity.goal_reach = toNumber_(planRow.goal_reach);
-        mergedEntity.goal_impressions = toNumber_(planRow.goal_impressions);
 
         let metrics = null;
         if (targetPlatform === 'google') {
           metrics = fetchGoogleEntityMetrics_(mergedEntity);
         } else if (targetPlatform === 'meta') {
           metrics = fetchMetaEntityMetrics_(mergedEntity);
-        } else if (targetPlatform === 'tiktok') {
-          metrics = fetchTikTokEntityMetrics_(mergedEntity);
         } else {
           throw new Error('Unsupported platform: ' + targetPlatform);
         }
@@ -60,9 +61,9 @@ function refreshRawAllFromPlan_(platform) {
         metrics.goal_impressions = toNumber_(planRow.goal_impressions);
         metrics.goal_reach = toNumber_(planRow.goal_reach);
 
-        const rawReach = metrics.reach === '' ? 0 : toNumber_(metrics.reach);
-        metrics.frequency = rawReach > 0
-          ? toNumber_(metrics.impressions) / rawReach
+        // Enforce required formula source for frequency.
+        metrics.frequency = toNumber_(metrics.reach) > 0
+          ? toNumber_(metrics.impressions) / toNumber_(metrics.reach)
           : 0;
 
         output.push(mapRawRow_(metrics));
@@ -88,7 +89,7 @@ function refreshRawAllFromPlan_(platform) {
           goal_impressions: toNumber_(planRow.goal_impressions),
           goal_reach: toNumber_(planRow.goal_reach),
           impressions: 0,
-          reach: '',
+          reach: 0,
           frequency: 0,
           cpm: 0,
           video_p25: 0,
@@ -106,39 +107,12 @@ function refreshRawAllFromPlan_(platform) {
   });
 }
 
-function findEnabledEntityMatch_(enabledByKey, platform, normalizedEntity) {
-  const accountId = normalizeId_(normalizedEntity.account_id);
-  const entityLevel = normalizeEntityLevel_(normalizedEntity.entity_level);
-  const entityId = normalizeId_(normalizedEntity.entity_id);
-  const platformKey = normalizePlatform_(platform);
-
-  const exact = enabledByKey[entityKey_(platformKey, accountId, entityLevel, entityId)];
-  if (exact) return exact;
-
-  // Legacy compatibility: older PLAN rows may have blank account_id.
-  const blankAccount = enabledByKey[entityKey_(platformKey, '', entityLevel, entityId)];
-  if (blankAccount) return blankAccount;
-
-  // Fallback scan by normalized entity tuple when account differs.
-  const keys = Object.keys(enabledByKey);
-  for (let i = 0; i < keys.length; i++) {
-    const r = enabledByKey[keys[i]];
-    if (normalizePlatform_(r.platform) !== platformKey) continue;
-    if (normalizeEntityLevel_(r.entity_level) !== entityLevel) continue;
-    if (normalizeId_(r.entity_id) !== entityId) continue;
-    return r;
-  }
-
-  return {};
-}
-
 function normalizePlanEntity_(row) {
   const platform = normalizePlatform_(row.platform);
-  const defaultLevel = platform === 'google' ? 'campaign' : (platform === 'tiktok' ? 'adgroup' : 'adset');
-  const entityLevel = normalizeEntityLevel_(row.entity_level || defaultLevel);
+  const entityLevel = normalizeEntityLevel_(row.entity_level || (platform === 'google' ? 'campaign' : 'adset'));
   const entityId = normalizeId_(row.entity_id);
   const entityName = normalizeId_(row.entity_name);
-  const parsed = parseCompositeEntityName_(entityName);
+  const parsed = parseMetaEntityName_(entityName);
 
   return {
     platform: platform,
@@ -146,10 +120,26 @@ function normalizePlanEntity_(row) {
     entity_level: entityLevel,
     entity_id: entityId,
     entity_name: entityName,
-    campaign_id: normalizeId_(row.campaign_id),
-    campaign_name: normalizeId_(row.campaign_name) || parsed.campaign_name,
-    adset_id: normalizeId_(row.adset_id),
-    adset_name: normalizeId_(row.adset_name) || parsed.child_name
+    campaign_id: entityLevel === 'campaign' ? entityId : normalizeId_(row.campaign_id),
+    campaign_name: entityLevel === 'campaign'
+      ? entityName
+      : (normalizeId_(row.campaign_name) || parsed.campaign_name),
+    adset_id: entityLevel === 'adset' ? entityId : normalizeId_(row.adset_id),
+    adset_name: entityLevel === 'adset'
+      ? (normalizeId_(row.adset_name) || parsed.adset_name)
+      : normalizeId_(row.adset_name)
+  };
+}
+
+function parseMetaEntityName_(entityName) {
+  const raw = String(entityName || '');
+  const split = raw.split(' | ');
+  if (split.length < 2) {
+    return { campaign_name: raw, adset_name: raw };
+  }
+  return {
+    campaign_name: split[0].trim(),
+    adset_name: split.slice(1).join(' | ').trim()
   };
 }
 
@@ -163,11 +153,7 @@ function mergePlanAndEnabledEntity_(planEntity, enabledEntity) {
     campaign_id: planEntity.campaign_id || normalizeId_(enabledEntity.campaign_id),
     campaign_name: planEntity.campaign_name || normalizeId_(enabledEntity.campaign_name),
     adset_id: planEntity.adset_id || normalizeId_(enabledEntity.adset_id),
-    adset_name: planEntity.adset_name || normalizeId_(enabledEntity.adset_name),
-    start_date: normalizeId_(enabledEntity.start_date),
-    end_date: normalizeId_(enabledEntity.end_date),
-    status: normalizeId_(enabledEntity.status),
-    channel_type: normalizeId_(enabledEntity.channel_type)
+    adset_name: planEntity.adset_name || normalizeId_(enabledEntity.adset_name)
   };
 
   if (!merged.entity_id) {
@@ -180,22 +166,6 @@ function mergePlanAndEnabledEntity_(planEntity, enabledEntity) {
 
   if (!merged.entity_name) {
     merged.entity_name = merged.entity_id;
-  }
-
-  if (!merged.campaign_id && merged.entity_level === 'campaign') {
-    merged.campaign_id = merged.entity_id;
-  }
-
-  if (!merged.campaign_name) {
-    merged.campaign_name = parseCompositeEntityName_(merged.entity_name).campaign_name;
-  }
-
-  if (!merged.adset_id && (merged.entity_level === 'adset' || merged.entity_level === 'adgroup')) {
-    merged.adset_id = merged.entity_id;
-  }
-
-  if (!merged.adset_name && (merged.entity_level === 'adset' || merged.entity_level === 'adgroup')) {
-    merged.adset_name = parseCompositeEntityName_(merged.entity_name).child_name;
   }
 
   return merged;
@@ -217,7 +187,7 @@ function mapRawRow_(row) {
     toNumber_(row.goal_impressions),
     toNumber_(row.goal_reach),
     toNumber_(row.impressions),
-    row.reach === '' ? '' : toNumber_(row.reach),
+    toNumber_(row.reach),
     toNumber_(row.frequency),
     toNumber_(row.cpm),
     toNumber_(row.video_p25),

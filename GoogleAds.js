@@ -81,7 +81,6 @@ function googleAdsSearchStream_(query) {
 function loadGoogleEntities() {
   withErrorLogging_('loadGoogleEntities failed', function () {
     ensureHeader_(SHEETS.CAMPAIGNS_ENABLED, HEADERS.CAMPAIGNS_ENABLED);
-    const cfg = getGoogleAdsConfig_();
     const keep = readObjects_(SHEETS.CAMPAIGNS_ENABLED).filter(function (r) {
       return normalizePlatform_(r.platform) !== 'google';
     });
@@ -113,7 +112,7 @@ function loadGoogleEntities() {
         const c = row.campaign || {};
         out.push([
           'google',
-          cfg.customerId,
+          '',
           'campaign',
           String(c.id || ''),
           c.name || '',
@@ -158,6 +157,9 @@ function fetchGoogleEntityMetrics_(entity) {
     'metrics.video_quartile_p75_rate',
     'metrics.video_quartile_p100_rate'
   ];
+  if (!GOOGLE_SKIP_UNIQUE_USERS_FOR_RUN_) {
+    fields.push('metrics.unique_users');
+  }
 
   const baseQuery = [
     'SELECT',
@@ -166,27 +168,48 @@ function fetchGoogleEntityMetrics_(entity) {
     'WHERE campaign.id = ' + campaignId
   ].join('\n');
 
-  const selected = flattenGoogleMetricRow_(googleAdsSearchStream_(baseQuery));
+  let selected = null;
+  let uniqueUsersFetchSucceeded = false;
+  try {
+    selected = flattenGoogleMetricRow_(googleAdsSearchStream_(baseQuery));
+    uniqueUsersFetchSucceeded = !GOOGLE_SKIP_UNIQUE_USERS_FOR_RUN_ && fields.indexOf('metrics.unique_users') !== -1;
+  } catch (e) {
+    const attemptedUniqueUsers = fields.indexOf('metrics.unique_users') !== -1;
+    if (!attemptedUniqueUsers) throw e;
+
+    if (!GOOGLE_SKIP_UNIQUE_USERS_FOR_RUN_ && isGoogleBandwidthQuotaError_(e.message || '')) {
+      GOOGLE_SKIP_UNIQUE_USERS_FOR_RUN_ = true;
+      log_('Google unique_users disabled for run', e.message);
+    } else {
+      log_('Google unique_users query failed', e.message);
+    }
+
+    const fallbackQuery = baseQuery.replace(',\n  metrics.unique_users', '');
+    selected = flattenGoogleMetricRow_(googleAdsSearchStream_(fallbackQuery));
+    uniqueUsersFetchSucceeded = false;
+  }
 
   if (!selected) {
     return null;
   }
 
+  let reach = selected.uniqueUsers === '' || selected.uniqueUsers === undefined
+    ? 0
+    : toNumber_(selected.uniqueUsers);
   const impressions = toNumber_(selected.impressions);
-  const needsReach = toNumber_(entity.goal_reach) > 0;
-  let reach = 0;
-  if (needsReach) {
-    reach = getGoogleReachWithCache_(
-      campaignId,
-      selected.name || normalizeId_(entity.entity_name),
-      normalizeId_(entity.account_id)
-    );
+
+  if (uniqueUsersFetchSucceeded && selected.uniqueUsers !== undefined && selected.uniqueUsers !== '') {
+    upsertGoogleReachCache_(campaignId, selected.name || normalizeId_(entity.entity_name), reach);
+  } else {
+    const cachedReach = getCachedGoogleReach_(campaignId);
+    if (cachedReach !== null) {
+      reach = cachedReach;
+    }
   }
-  const reachNumber = typeof reach === 'number' ? reach : toNumber_(reach);
 
   return {
     platform: 'google',
-    account_id: normalizeId_(entity.account_id) || getGoogleAdsConfig_().customerId,
+    account_id: '',
     entity_level: 'campaign',
     entity_id: String(selected.id || campaignId),
     entity_name: selected.name || normalizeId_(entity.entity_name),
@@ -198,7 +221,7 @@ function fetchGoogleEntityMetrics_(entity) {
     end_date: selected.endDate || '',
     impressions: impressions,
     reach: reach,
-    frequency: reachNumber > 0 ? impressions / reachNumber : 0,
+    frequency: reach > 0 ? impressions / reach : 0,
     cpm: toNumber_(selected.averageCpm) / 1000000,
     video_p25: toNumber_(selected.p25),
     video_p50: toNumber_(selected.p50),
@@ -892,53 +915,43 @@ function googleAdsMutateCampaigns_(payload, meta) {
 }
 
 function getCachedGoogleReach_(campaignId) {
-  const accountId = getGoogleAdsConfig_().customerId;
-  return getCachedReach_('google', accountId, 'campaign', normalizeId_(campaignId).replace(/-/g, ''));
+  ensureHeader_(SHEETS.REACH_CACHE, HEADERS.REACH_CACHE);
+  const cacheRows = readObjects_(SHEETS.REACH_CACHE);
+  for (let i = 0; i < cacheRows.length; i++) {
+    const r = cacheRows[i];
+    if (
+      normalizePlatform_(r.platform) === 'google' &&
+      normalizeEntityLevel_(r.entity_level) === 'campaign' &&
+      normalizeId_(r.entity_id).replace(/-/g, '') === normalizeId_(campaignId).replace(/-/g, '')
+    ) {
+      return toNumber_(r.reach);
+    }
+  }
+  return null;
 }
 
 function upsertGoogleReachCache_(campaignId, entityName, reach) {
+  ensureHeader_(SHEETS.REACH_CACHE, HEADERS.REACH_CACHE);
+  const sh = getSheet_(SHEETS.REACH_CACHE);
+  const lastRow = sh.getLastRow();
   const safeCampaignId = normalizeId_(campaignId).replace(/-/g, '');
-  const accountId = getGoogleAdsConfig_().customerId;
-  setCachedReach_('google', accountId, 'campaign', safeCampaignId, entityName || '', toNumber_(reach));
-}
+  const rowData = ['google', '', 'campaign', safeCampaignId, entityName || '', toNumber_(reach), new Date()];
 
-function getGoogleReachWithCache_(entityId, entityName, accountId) {
-  const cfg = getGoogleAdsConfig_();
-  const safeEntityId = normalizeId_(entityId).replace(/-/g, '');
-  const resolvedAccountId = normalizeId_(accountId) || cfg.customerId;
-  const cached = getCachedReach_('google', resolvedAccountId, 'campaign', safeEntityId);
-  if (cached !== null) {
-    return cached;
+  if (lastRow <= 1) {
+    sh.getRange(2, 1, 1, rowData.length).setValues([rowData]);
+    return;
   }
 
-  if (GOOGLE_SKIP_UNIQUE_USERS_FOR_RUN_) {
-    return '';
-  }
-
-  Utilities.sleep(250);
-  const query = [
-    'SELECT',
-    '  campaign.id,',
-    '  metrics.unique_users',
-    'FROM campaign',
-    'WHERE campaign.id = ' + safeEntityId
-  ].join('\n');
-
-  try {
-    const selected = flattenGoogleMetricRow_(googleAdsSearchStream_(query));
-    const uniqueUsers = selected && selected.uniqueUsers !== undefined && selected.uniqueUsers !== ''
-      ? toNumber_(selected.uniqueUsers)
-      : '';
-
-    if (uniqueUsers !== '') {
-      setCachedReach_('google', resolvedAccountId, 'campaign', safeEntityId, entityName, uniqueUsers);
+  const values = sh.getRange(2, 1, lastRow - 1, HEADERS.REACH_CACHE.length).getValues();
+  for (let i = 0; i < values.length; i++) {
+    const platform = normalizePlatform_(values[i][0]);
+    const level = normalizeEntityLevel_(values[i][2]);
+    const entityId = normalizeId_(values[i][3]).replace(/-/g, '');
+    if (platform === 'google' && level === 'campaign' && entityId === safeCampaignId) {
+      sh.getRange(i + 2, 1, 1, rowData.length).setValues([rowData]);
+      return;
     }
-    return uniqueUsers;
-  } catch (e) {
-    if (isGoogleBandwidthQuotaError_(e && e.message ? e.message : String(e))) {
-      GOOGLE_SKIP_UNIQUE_USERS_FOR_RUN_ = true;
-    }
-    log_('Google unique_users query failed', 'campaign_id=' + safeEntityId + '; reason=' + (e.message || e));
-    return '';
   }
+
+  sh.getRange(lastRow + 1, 1, 1, rowData.length).setValues([rowData]);
 }

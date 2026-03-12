@@ -111,8 +111,8 @@ function sortCampaignsEnabled_() {
   if (lastRow <= 2 || lastCol <= 0) return;
 
   sh.getRange(2, 1, lastRow - 1, lastCol).sort([
-    { column: 1, ascending: true },
-    { column: 5, ascending: true }
+    { column: 1, ascending: true }, // platform
+    { column: 5, ascending: true }  // entity_name
   ]);
 }
 
@@ -130,98 +130,6 @@ function ensureReachCacheSampleRow_() {
     250000,
     new Date()
   ]]);
-}
-
-function parseCompositeEntityName_(entityName) {
-  const raw = String(entityName || '');
-  const split = raw.split(' | ');
-  if (split.length < 2) {
-    return { campaign_name: raw, child_name: raw };
-  }
-  return {
-    campaign_name: split[0].trim(),
-    child_name: split.slice(1).join(' | ').trim()
-  };
-}
-
-function getCachedReach_(platform, accountId, entityLevel, entityId) {
-  ensureHeader_(SHEETS.REACH_CACHE, HEADERS.REACH_CACHE);
-  const now = new Date().getTime();
-  const rows = readObjects_(SHEETS.REACH_CACHE);
-  const targetPlatform = normalizePlatform_(platform);
-  const targetAccountId = normalizeId_(accountId);
-  const targetLevel = normalizeEntityLevel_(entityLevel);
-  const targetEntityId = normalizeId_(entityId);
-
-  for (let i = 0; i < rows.length; i++) {
-    const r = rows[i];
-    if (normalizePlatform_(r.platform) !== targetPlatform) continue;
-    const rowAccountId = normalizeId_(r.account_id);
-    if (rowAccountId !== targetAccountId) {
-      // Backward compatibility: old Google cache rows may have blank account_id.
-      if (!(targetPlatform === 'google' && rowAccountId === '')) continue;
-    }
-    if (normalizeEntityLevel_(r.entity_level) !== targetLevel) continue;
-    if (normalizeId_(r.entity_id) !== targetEntityId) continue;
-
-    const cachedAt = r.cached_at ? new Date(r.cached_at).getTime() : 0;
-    if (!cachedAt || isNaN(cachedAt)) return null;
-
-    const ageHours = (now - cachedAt) / 3600000;
-    if (ageHours > REACH_CACHE_TTL_HOURS) {
-      return null;
-    }
-
-    return toNumber_(r.reach);
-  }
-
-  return null;
-}
-
-function setCachedReach_(platform, accountId, entityLevel, entityId, entityName, reach) {
-  ensureHeader_(SHEETS.REACH_CACHE, HEADERS.REACH_CACHE);
-  const sh = getSheet_(SHEETS.REACH_CACHE);
-  const data = sh.getDataRange().getValues();
-  const rowData = [
-    normalizePlatform_(platform),
-    normalizeId_(accountId),
-    normalizeEntityLevel_(entityLevel),
-    normalizeId_(entityId),
-    normalizeId_(entityName),
-    toNumber_(reach),
-    new Date()
-  ];
-
-  if (data.length < 2) {
-    sh.getRange(2, 1, 1, rowData.length).setValues([rowData]);
-    return;
-  }
-
-  const headers = data[0];
-  const idx = {
-    platform: headers.indexOf('platform'),
-    account_id: headers.indexOf('account_id'),
-    entity_level: headers.indexOf('entity_level'),
-    entity_id: headers.indexOf('entity_id')
-  };
-
-  for (let i = 1; i < data.length; i++) {
-    const row = data[i];
-    const rowPlatform = normalizePlatform_(row[idx.platform]);
-    const rowAccountId = normalizeId_(row[idx.account_id]);
-    const accountMatches = rowAccountId === rowData[1] || (rowData[0] === 'google' && rowAccountId === '');
-    if (
-      rowPlatform === rowData[0] &&
-      accountMatches &&
-      normalizeEntityLevel_(row[idx.entity_level]) === rowData[2] &&
-      normalizeId_(row[idx.entity_id]) === rowData[3]
-    ) {
-      sh.getRange(i + 1, 1, 1, rowData.length).setValues([rowData]);
-      return;
-    }
-  }
-
-  sh.getRange(sh.getLastRow() + 1, 1, 1, rowData.length).setValues([rowData]);
 }
 
 function logGoogleChange_(entry) {

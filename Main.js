@@ -7,11 +7,9 @@ function onOpen() {
     .addSeparator()
     .addItem('Load Google entities', 'loadGoogleEntities')
     .addItem('Load Meta entities', 'loadMetaEntities')
-    .addItem('Load TikTok entities', 'loadTikTokEntities')
     .addSeparator()
     .addItem('Refresh RAW_ALL from PLAN (Google)', 'refreshRawAllFromPlanGoogle')
     .addItem('Refresh RAW_ALL from PLAN (Meta)', 'refreshRawAllFromPlanMeta')
-    .addItem('Refresh RAW_ALL from PLAN (TikTok)', 'refreshRawAllFromPlanTikTok')
     .addItem('Build SUMMARY', 'buildSummary')
     .addItem('Build DASHBOARD', 'buildDashboard')
     .addItem('Generate VIDEO Ads Script', 'generateVideoAdsScript')
@@ -36,9 +34,9 @@ function setupSheets() {
     ensureHeader_(SHEETS.RAW_ALL, HEADERS.RAW_ALL);
     ensureHeader_(SHEETS.SUMMARY, HEADERS.SUMMARY);
     ensureHeader_(SHEETS.LOG, HEADERS.LOG);
-    ensureHeader_(SHEETS.REACH_CACHE, HEADERS.REACH_CACHE);
     ensureHeader_(SHEETS.GOOGLE_CHANGES_LOG, HEADERS.GOOGLE_CHANGES_LOG);
     ensureHeader_(SHEETS.VIDEO_ACTION_QUEUE, HEADERS.VIDEO_ACTION_QUEUE);
+    ensureHeader_(SHEETS.REACH_CACHE, HEADERS.REACH_CACHE);
     ensureReachCacheSampleRow_();
     SpreadsheetApp.getUi().alert('Sheets created/validated.');
   });
@@ -59,21 +57,15 @@ function checkConfig() {
     ensureHeader_(SHEETS.LOG, HEADERS.LOG);
     const sh = getSheet_('CONFIG_CHECK');
     sh.clear();
-    sh.getRange(1, 1, 1, 3).setValues([['key', 'required', 'status']]);
+    sh.getRange(1, 1, 1, 2).setValues([['key', 'status']]);
 
     const props = getScriptProps_();
-    const rows = [];
-
-    SCRIPT_PROPERTY_KEYS_REQUIRED.forEach(function (k) {
-      rows.push([k, 'yes', isConfigured_(props.getProperty(k)) ? 'OK' : 'MISSING']);
-    });
-
-    SCRIPT_PROPERTY_KEYS_OPTIONAL.forEach(function (k) {
-      rows.push([k, 'no', isConfigured_(props.getProperty(k)) ? 'OK' : 'OPTIONAL_MISSING']);
+    const rows = SCRIPT_PROPERTY_KEYS.map(function (k) {
+      return [k, isConfigured_(props.getProperty(k)) ? 'OK' : 'MISSING'];
     });
 
     if (rows.length) {
-      sh.getRange(2, 1, rows.length, 3).setValues(rows);
+      sh.getRange(2, 1, rows.length, 2).setValues(rows);
     }
 
     SpreadsheetApp.getUi().alert('Config check written to CONFIG_CHECK.');
@@ -94,22 +86,14 @@ function refreshRawAllFromPlanMeta() {
   });
 }
 
-function refreshRawAllFromPlanTikTok() {
-  withErrorLogging_('refreshRawAllFromPlanTikTok failed', function () {
-    refreshRawAllFromPlan_('tiktok');
-    SpreadsheetApp.getUi().alert('RAW_ALL refreshed for TikTok.');
-  });
-}
-
 function runFullPipeline() {
   withErrorLogging_('runFullPipeline failed', function () {
     loadGoogleEntities();
     loadMetaEntities();
-    loadTikTokEntities();
     refreshRawAllFromPlan_('google');
     refreshRawAllFromPlan_('meta');
-    refreshRawAllFromPlan_('tiktok');
     buildSummary();
+    buildDashboard();
     SpreadsheetApp.getUi().alert('Full pipeline complete.');
   });
 }

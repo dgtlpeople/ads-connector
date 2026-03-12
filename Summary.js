@@ -28,7 +28,6 @@ function buildSummary() {
       const goalReach = toNumber_(r.goal_reach);
       const impressions = toNumber_(r.impressions);
       const reach = toNumber_(r.reach);
-      const frequency = reach > 0 ? impressions / reach : 0;
 
       const expectedImpressionsToDate = daysTotal > 0 ? goalImpressions * (daysElapsed / daysTotal) : 0;
       const expectedReachToDate = daysTotal > 0 ? goalReach * (daysElapsed / daysTotal) : 0;
@@ -38,7 +37,7 @@ function buildSummary() {
       const impressionPacePct = expectedImpressionsToDate > 0 ? impressions / expectedImpressionsToDate : 0;
       const reachPacePct = expectedReachToDate > 0 ? reach / expectedReachToDate : 0;
 
-      const action = recommendAction_(impressionPacePct, reachPacePct);
+      const action = recommendAction_(impressionPacePct, reachPacePct, toNumber_(r.frequency));
 
       return [
         r.platform || '',
@@ -56,7 +55,7 @@ function buildSummary() {
         goalReach,
         impressions,
         reach,
-        frequency,
+        toNumber_(r.frequency),
         toNumber_(r.cpm),
         toNumber_(r.video_p25),
         toNumber_(r.video_p50),
@@ -81,14 +80,15 @@ function buildSummary() {
   });
 }
 
-function recommendAction_(impressionPacePct, reachPacePct) {
+function recommendAction_(impressionPacePct, reachPacePct, frequency) {
   const imp = toNumber_(impressionPacePct);
   const reach = toNumber_(reachPacePct);
+  const freq = toNumber_(frequency);
 
   if (imp < 0.9) return 'Increase budget';
   if (imp > 1.5) return 'Decrease budget';
   if (reach >= 1 && imp < 1) return 'Increase frequency cap';
-  if (imp > 1 && reach < 0.9) return 'Expand reach';
+  if (imp > 1 && reach < 0.9) return freq >= 3 ? 'Decrease frequency cap' : 'Expand reach';
   if (imp >= 0.95 && imp <= 1.1 && reach >= 0.95 && reach <= 1.1) return 'On track';
   return 'Monitor';
 }

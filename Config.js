@@ -95,15 +95,6 @@ const HEADERS = {
     'channel_type'
   ],
   LOG: ['timestamp', 'message', 'detail'],
-  REACH_CACHE: [
-    'platform',
-    'account_id',
-    'entity_level',
-    'entity_id',
-    'entity_name',
-    'reach',
-    'cached_at'
-  ],
   GOOGLE_CHANGES_LOG: [
     'timestamp',
     'action',
@@ -128,10 +119,19 @@ const HEADERS = {
     'processed_at',
     'result',
     'last_error'
+  ],
+  REACH_CACHE: [
+    'platform',
+    'account_id',
+    'entity_level',
+    'entity_id',
+    'entity_name',
+    'reach',
+    'last_success_at'
   ]
 };
 
-const SCRIPT_PROPERTY_KEYS_REQUIRED = [
+const SCRIPT_PROPERTY_KEYS = [
   'GOOGLE_ADS_DEVELOPER_TOKEN',
   'GOOGLE_ADS_CUSTOMER_ID',
   'GOOGLE_ADS_LOGIN_CUSTOMER_ID',
@@ -139,18 +139,8 @@ const SCRIPT_PROPERTY_KEYS_REQUIRED = [
   'GOOGLE_OAUTH_CLIENT_SECRET',
   'GOOGLE_ADS_REFRESH_TOKEN',
   'META_ACCESS_TOKEN',
-  'META_AD_ACCOUNT_IDS',
-  'TIKTOK_ACCESS_TOKEN',
-  'TIKTOK_ADVERTISER_ID'
+  'META_AD_ACCOUNT_IDS'
 ];
-
-const SCRIPT_PROPERTY_KEYS_OPTIONAL = [
-  'TIKTOK_REFRESH_TOKEN',
-  'TIKTOK_APP_ID',
-  'TIKTOK_SECRET'
-];
-
-const REACH_CACHE_TTL_HOURS = 24;
 
 function getScriptProps_() {
   return PropertiesService.getScriptProperties();
