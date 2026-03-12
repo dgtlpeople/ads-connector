@@ -1,4 +1,5 @@
 var GOOGLE_SKIP_UNIQUE_USERS_FOR_RUN_ = false;
+var GOOGLE_UNIQUE_USERS_STALE_RETRY_DONE_ = false;
 
 function getGoogleAdsConfig_() {
   const props = getScriptProps_();
@@ -909,14 +910,25 @@ function getGoogleReachWithCache_(entityId, entityName, accountId) {
   const cfg = getGoogleAdsConfig_();
   const safeEntityId = normalizeId_(entityId).replace(/-/g, '');
   const resolvedAccountId = normalizeId_(accountId) || cfg.customerId;
-  const cached = getCachedReach_('google', resolvedAccountId, 'campaign', safeEntityId);
+  const cacheEntry = getCachedReachEntry_('google', resolvedAccountId, 'campaign', safeEntityId, { allowExpired: true });
+  const cached = cacheEntry && !cacheEntry.isExpired ? cacheEntry.reach : null;
   if (cached !== null) {
-    return cached;
+    if (cacheEntry.isToday) {
+      return cached;
+    }
   }
-  const staleCached = getCachedReach_('google', resolvedAccountId, 'campaign', safeEntityId, { allowExpired: true });
+  const staleCached = cacheEntry ? cacheEntry.reach : null;
 
   if (GOOGLE_SKIP_UNIQUE_USERS_FOR_RUN_) {
-    return staleCached !== null ? staleCached : '';
+    if (!cacheEntry || cacheEntry.isToday || GOOGLE_UNIQUE_USERS_STALE_RETRY_DONE_) {
+      return staleCached !== null ? staleCached : '';
+    }
+    GOOGLE_UNIQUE_USERS_STALE_RETRY_DONE_ = true;
+    log_('Google unique_users retry', 'campaign_id=' + safeEntityId + '; reason=cache_not_today');
+  }
+
+  if (cacheEntry && !cacheEntry.isToday) {
+    log_('Google unique_users refresh', 'campaign_id=' + safeEntityId + '; cache_date=' + formatDate_(new Date(cacheEntry.cachedAt)));
   }
 
   Utilities.sleep(250);

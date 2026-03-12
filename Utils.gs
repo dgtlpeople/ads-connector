@@ -155,9 +155,10 @@ function parseCompositeEntityName_(entityName) {
   };
 }
 
-function getCachedReach_(platform, accountId, entityLevel, entityId, options) {
+function getCachedReachEntry_(platform, accountId, entityLevel, entityId, options) {
   ensureHeader_(SHEETS.REACH_CACHE, HEADERS.REACH_CACHE);
   const now = new Date().getTime();
+  const todayKey = formatDate_(new Date());
   const rows = readObjects_(SHEETS.REACH_CACHE);
   const targetPlatform = normalizePlatform_(platform);
   const targetAccountId = normalizeId_(accountId);
@@ -183,19 +184,31 @@ function getCachedReach_(platform, accountId, entityLevel, entityId, options) {
     if (!cachedAt || isNaN(cachedAt)) continue;
     const reach = toNumber_(r.reach);
 
+    const entry = {
+      cachedAt: cachedAt,
+      reach: reach,
+      ageHours: (now - cachedAt) / 3600000,
+      isToday: formatDate_(new Date(cachedAt)) === todayKey
+    };
+    entry.isExpired = entry.ageHours > REACH_CACHE_TTL_HOURS;
+
     if (!freshestAny || cachedAt > freshestAny.cachedAt) {
-      freshestAny = { cachedAt: cachedAt, reach: reach };
+      freshestAny = entry;
     }
 
-    const ageHours = (now - cachedAt) / 3600000;
-    if (ageHours <= REACH_CACHE_TTL_HOURS && (!freshestValid || cachedAt > freshestValid.cachedAt)) {
-      freshestValid = { cachedAt: cachedAt, reach: reach };
+    if (!entry.isExpired && (!freshestValid || cachedAt > freshestValid.cachedAt)) {
+      freshestValid = entry;
     }
   }
 
-  if (freshestValid) return freshestValid.reach;
-  if (allowExpired && freshestAny) return freshestAny.reach;
+  if (freshestValid) return freshestValid;
+  if (allowExpired && freshestAny) return freshestAny;
   return null;
+}
+
+function getCachedReach_(platform, accountId, entityLevel, entityId, options) {
+  const entry = getCachedReachEntry_(platform, accountId, entityLevel, entityId, options);
+  return entry ? entry.reach : null;
 }
 
 function setCachedReach_(platform, accountId, entityLevel, entityId, entityName, reach) {

@@ -419,11 +419,12 @@ function fetchTikTokEntityMetrics_(entityId, accountId, maybeEntity) {
   const adgroupName = normalizeId_(adgroup.adgroup_name) || normalizeId_(entity.adset_name) || parseCompositeEntityName_(entity.entity_name).child_name;
   const startDate = normalizeTikTokDate_(adgroup.schedule_start_time) || formatDate_(new Date());
 
-  let endDate = normalizeTikTokDate_(adgroup.schedule_end_time) || formatDate_(new Date());
+  const endDate = normalizeTikTokDate_(adgroup.schedule_end_time) || normalizeId_(entity.end_date) || formatDate_(new Date());
+  let reportEndDate = endDate;
   const today = formatDate_(new Date());
-  if (endDate > today) endDate = today;
+  if (reportEndDate > today) reportEndDate = today;
 
-  const reportRow = fetchTikTokReportRow_(advertiserId, adgroupId, startDate, endDate) || {};
+  const reportRow = fetchTikTokReportRow_(advertiserId, adgroupId, startDate, reportEndDate) || {};
   const metricMap = getTikTokMetricMap_();
   const sourceMetrics = reportRow.metrics || reportRow;
 
