@@ -124,13 +124,15 @@ function loadGoogleEntities() {
           c.startDate || '',
           c.endDate || '',
           c.status || '',
-          c.advertisingChannelType || ''
+          c.advertisingChannelType || '',
+          ''
         ]);
       });
     });
 
     if (out.length) appendRows_(SHEETS.CAMPAIGNS_ENABLED, out);
     sortCampaignsEnabled_();
+    updateCampaignsEnabledPlanStatusForPlatform_('google');
   });
 }
 
@@ -265,7 +267,8 @@ function mapCampaignEnabledRow_(row) {
     row.start_date || '',
     row.end_date || '',
     row.status || '',
-    row.channel_type || ''
+    row.channel_type || '',
+    row.plan_status || ''
   ];
 }
 

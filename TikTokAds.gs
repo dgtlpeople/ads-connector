@@ -31,17 +31,20 @@ function buildQueryString_(params) {
       return params[k] !== undefined && params[k] !== null && params[k] !== '';
     })
     .map(function (k) {
-      return encodeURIComponent(k) + '=' + encodeURIComponent(String(params[k]));
+      const value = params[k];
+      const serialized = (typeof value === 'object') ? JSON.stringify(value) : String(value);
+      return encodeURIComponent(k) + '=' + encodeURIComponent(serialized);
     })
     .join('&');
 }
 
-function tiktokApiRequestRaw_(path, method, payload, accessToken) {
-  const baseUrl = 'https://business-api.tiktok.com/open_api/v1.3/';
+function tiktokApiRequestRaw_(path, method, payload, accessToken, options) {
+  const requestOptions = options || {};
+  const baseUrl = String(requestOptions.baseUrl || 'https://business-api.tiktok.com/open_api/v1.3/').replace(/\/+$/, '') + '/';
   const normalizedMethod = String(method || 'get').toLowerCase();
   let url = baseUrl + path.replace(/^\//, '');
 
-  const options = {
+  const fetchOptions = {
     method: normalizedMethod,
     muteHttpExceptions: true,
     headers: {
@@ -54,10 +57,10 @@ function tiktokApiRequestRaw_(path, method, payload, accessToken) {
     const qs = buildQueryString_(payload || {});
     if (qs) url += '?' + qs;
   } else if (payload) {
-    options.payload = JSON.stringify(payload);
+    fetchOptions.payload = JSON.stringify(payload);
   }
 
-  const res = UrlFetchApp.fetch(url, options);
+  const res = UrlFetchApp.fetch(url, fetchOptions);
   const code = res.getResponseCode();
   const bodyText = res.getContentText();
   let body = {};
@@ -71,13 +74,15 @@ function tiktokApiRequestRaw_(path, method, payload, accessToken) {
   return {
     code: code,
     body: body,
-    bodyText: bodyText
+    bodyText: bodyText,
+    requestUrl: url,
+    requestMethod: normalizedMethod
   };
 }
 
-function tiktokApiRequestWithAuthRetry_(path, method, payload) {
+function tiktokApiRequestWithAuthRetry_(path, method, payload, options) {
   const cfg = getTikTokConfig_();
-  let response = tiktokApiRequestRaw_(path, method, payload, cfg.accessToken);
+  let response = tiktokApiRequestRaw_(path, method, payload, cfg.accessToken, options);
 
   const apiCode = response.body && response.body.code !== undefined ? toNumber_(response.body.code) : 0;
   const failed = response.code < 200 || response.code >= 300 || apiCode !== 0;
@@ -88,7 +93,7 @@ function tiktokApiRequestWithAuthRetry_(path, method, payload) {
 
   const authError = isTikTokAuthError_(response.code, response.bodyText) || isTikTokAuthError_(response.code, response.body && response.body.message);
   if (!authError) {
-    throw new Error('TikTok API error ' + response.code + ': ' + response.bodyText);
+    throw new Error('TikTok API error ' + response.code + ' [' + response.requestMethod.toUpperCase() + ' ' + response.requestUrl + ']: ' + response.bodyText);
   }
 
   if (!tiktokHasRefreshConfig_(cfg)) {
@@ -97,15 +102,41 @@ function tiktokApiRequestWithAuthRetry_(path, method, payload) {
   }
 
   const refreshedToken = refreshTikTokAccessToken_();
-  response = tiktokApiRequestRaw_(path, method, payload, refreshedToken);
+  response = tiktokApiRequestRaw_(path, method, payload, refreshedToken, options);
   const retryCode = response.body && response.body.code !== undefined ? toNumber_(response.body.code) : 0;
   const retryFailed = response.code < 200 || response.code >= 300 || retryCode !== 0;
 
   if (retryFailed) {
-    throw new Error('TikTok API error after token refresh ' + response.code + ': ' + response.bodyText);
+    throw new Error('TikTok API error after token refresh ' + response.code + ' [' + response.requestMethod.toUpperCase() + ' ' + response.requestUrl + ']: ' + response.bodyText);
   }
 
   return response.body;
+}
+
+function fetchTikTokReportBodyWithFallback_(payload) {
+  const attempts = [
+    { method: 'get', path: '/report/integrated/get/', baseUrl: 'https://business-api.tiktok.com/open_api/v1.3/' },
+    { method: 'get', path: '/report/integrated/get', baseUrl: 'https://business-api.tiktok.com/open_api/v1.3/' },
+    { method: 'post', path: '/report/integrated/get/', baseUrl: 'https://business-api.tiktok.com/open_api/v1.3/' },
+    { method: 'post', path: '/report/integrated/get', baseUrl: 'https://business-api.tiktok.com/open_api/v1.3/' },
+    { method: 'get', path: '/report/integrated/get/', baseUrl: 'https://ads.tiktok.com/open_api/v1.3/' },
+    { method: 'post', path: '/report/integrated/get/', baseUrl: 'https://ads.tiktok.com/open_api/v1.3/' }
+  ];
+
+  let lastError = null;
+  for (let i = 0; i < attempts.length; i++) {
+    const attempt = attempts[i];
+    try {
+      return tiktokApiRequestWithAuthRetry_(attempt.path, attempt.method, payload, { baseUrl: attempt.baseUrl });
+    } catch (e) {
+      lastError = e;
+      if (String(e && e.message || '').indexOf('TikTok API error 405') === -1) {
+        throw e;
+      }
+    }
+  }
+
+  throw lastError || new Error('TikTok report request failed for all fallback attempts.');
 }
 
 function normalizeTikTokDate_(value) {
@@ -143,7 +174,8 @@ function mapTikTokEntityRow_(adgroup) {
     normalizeTikTokDate_(adgroup.schedule_start_time),
     normalizeTikTokDate_(adgroup.schedule_end_time),
     normalizeId_(adgroup.operation_status),
-    normalizeId_(adgroup.optimization_goal)
+    normalizeId_(adgroup.optimization_goal),
+    ''
   ];
 }
 
@@ -203,6 +235,7 @@ function loadTikTokEntities() {
 
     if (out.length) appendRows_(SHEETS.CAMPAIGNS_ENABLED, out);
     sortCampaignsEnabled_();
+    updateCampaignsEnabledPlanStatusForPlatform_('tiktok');
   });
 }
 
@@ -264,7 +297,7 @@ function fetchTikTokReportRow_(advertiserId, adgroupId, startDate, endDate) {
     filters: [{ field_name: 'adgroup_ids', filter_type: 'IN', filter_value: [String(adgroupId)] }]
   };
 
-  const body = tiktokApiRequestWithAuthRetry_('/report/integrated/get/', 'post', payload);
+  const body = fetchTikTokReportBodyWithFallback_(payload);
   const list = body.data && body.data.list ? body.data.list : [];
 
   for (let i = 0; i < list.length; i++) {

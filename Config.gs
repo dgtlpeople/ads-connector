@@ -24,7 +24,8 @@ const HEADERS = {
     'start_date',
     'end_date',
     'status',
-    'channel_type'
+    'channel_type',
+    'plan_status'
   ],
   PLAN: [
     'platform',

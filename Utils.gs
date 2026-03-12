@@ -105,15 +105,23 @@ function withErrorLogging_(message, fn) {
 }
 
 function sortCampaignsEnabled_() {
-  const sh = getSheet_(SHEETS.CAMPAIGNS_ENABLED);
-  const lastRow = sh.getLastRow();
-  const lastCol = sh.getLastColumn();
-  if (lastRow <= 2 || lastCol <= 0) return;
+  ensureHeader_(SHEETS.CAMPAIGNS_ENABLED, HEADERS.CAMPAIGNS_ENABLED);
+  const rows = readObjects_(SHEETS.CAMPAIGNS_ENABLED);
+  if (!rows.length) return;
 
-  sh.getRange(2, 1, lastRow - 1, lastCol).sort([
-    { column: 1, ascending: true },
-    { column: 5, ascending: true }
-  ]);
+  rows.sort(function (a, b) {
+    const aEnded = String(a.plan_status || '') === 'ENDED_NOT_REQUIRED_IN_PLAN';
+    const bEnded = String(b.plan_status || '') === 'ENDED_NOT_REQUIRED_IN_PLAN';
+    if (aEnded !== bEnded) return aEnded ? 1 : -1;
+
+    const p = normalizePlatform_(a.platform).localeCompare(normalizePlatform_(b.platform));
+    if (p !== 0) return p;
+
+    return normalizeId_(a.entity_name).localeCompare(normalizeId_(b.entity_name));
+  });
+
+  clearDataKeepHeader_(SHEETS.CAMPAIGNS_ENABLED);
+  appendRows_(SHEETS.CAMPAIGNS_ENABLED, rows.map(mapCampaignEnabledRow_));
 }
 
 function ensureReachCacheSampleRow_() {
@@ -346,4 +354,93 @@ function generateVideoQueueAdsScript_() {
   sh.getRange(2, 1).setValue('Copy only cell A1 into Google Ads Script.');
   sh.setColumnWidth(1, 1200);
   sh.setRowHeight(1, 900);
+}
+
+function buildPlanEntityLookup_() {
+  ensureHeader_(SHEETS.PLAN, HEADERS.PLAN);
+  const planRows = readObjects_(SHEETS.PLAN);
+  const lookup = {};
+
+  planRows.forEach(function (r) {
+    const platform = normalizePlatform_(r.platform);
+    const accountId = normalizeId_(r.account_id);
+    const level = normalizeEntityLevel_(r.entity_level);
+    const entityId = normalizeId_(r.entity_id);
+    if (!platform || !level || !entityId) return;
+    lookup[entityKey_(platform, accountId, level, entityId)] = true;
+  });
+
+  return lookup;
+}
+
+function isEntityInPlan_(lookup, row) {
+  const platform = normalizePlatform_(row.platform);
+  const accountId = normalizeId_(row.account_id);
+  const level = normalizeEntityLevel_(row.entity_level);
+  const entityId = normalizeId_(row.entity_id);
+  if (!platform || !level || !entityId) return false;
+
+  if (lookup[entityKey_(platform, accountId, level, entityId)]) return true;
+
+  // Backward compatibility with historical blank account_id in PLAN.
+  if (lookup[entityKey_(platform, '', level, entityId)]) return true;
+
+  return false;
+}
+
+function isLiveByEndDate_(endDateValue) {
+  const end = formatDate_(endDateValue);
+  if (!end) return false;
+  const today = formatDate_(new Date());
+  return end >= today;
+}
+
+function updateCampaignsEnabledPlanStatusForPlatform_(platform) {
+  const targetPlatform = normalizePlatform_(platform);
+  ensureHeader_(SHEETS.CAMPAIGNS_ENABLED, HEADERS.CAMPAIGNS_ENABLED);
+  ensureHeader_(SHEETS.PLAN, HEADERS.PLAN);
+  const rows = readObjects_(SHEETS.CAMPAIGNS_ENABLED);
+  if (!rows.length) return;
+
+  const lookup = buildPlanEntityLookup_();
+  let liveNotInPlanCount = 0;
+  const planAppendRows = [];
+
+  rows.forEach(function (r) {
+    if (normalizePlatform_(r.platform) !== targetPlatform) return;
+
+    if (!isLiveByEndDate_(r.end_date)) {
+      r.plan_status = 'ENDED_NOT_REQUIRED_IN_PLAN';
+      return;
+    }
+
+    if (isEntityInPlan_(lookup, r)) {
+      r.plan_status = 'LIVE_IN_PLAN';
+    } else {
+      r.plan_status = 'LIVE_NOT_IN_PLAN';
+      liveNotInPlanCount += 1;
+
+      const planKey = entityKey_(r.platform, r.account_id, r.entity_level, r.entity_id);
+      if (!lookup[planKey]) {
+        planAppendRows.push([
+          r.platform || '',
+          r.account_id || '',
+          r.entity_level || '',
+          r.entity_id || '',
+          r.entity_name || '',
+          1,
+          1
+        ]);
+        lookup[planKey] = true;
+      }
+    }
+  });
+
+  clearDataKeepHeader_(SHEETS.CAMPAIGNS_ENABLED);
+  appendRows_(SHEETS.CAMPAIGNS_ENABLED, rows.map(mapCampaignEnabledRow_));
+  sortCampaignsEnabled_();
+  if (planAppendRows.length) {
+    appendRows_(SHEETS.PLAN, planAppendRows);
+  }
+  log_('PLAN status updated', 'platform=' + targetPlatform + '; live_not_in_plan=' + liveNotInPlanCount);
 }
