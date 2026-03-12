@@ -139,6 +139,88 @@ function fetchTikTokReportBodyWithFallback_(payload) {
   throw lastError || new Error('TikTok report request failed for all fallback attempts.');
 }
 
+function extractTikTokInvalidMetricFields_(message) {
+  const text = String(message || '');
+  const match = text.match(/Invalid metric fields:\s*(\[[^\]]*\])/i);
+  if (!match || !match[1]) return [];
+
+  try {
+    return JSON.parse(match[1].replace(/'/g, '"'))
+      .map(function (m) { return normalizeId_(m); })
+      .filter(function (m) { return !!m; });
+  } catch (e) {
+    return [];
+  }
+}
+
+function getTikTokInvalidMetricsCacheKey_(advertiserId) {
+  return 'TIKTOK_INVALID_REPORT_METRICS_' + normalizeId_(advertiserId || '');
+}
+
+function readTikTokInvalidMetricsCache_(advertiserId) {
+  const key = getTikTokInvalidMetricsCacheKey_(advertiserId);
+  const raw = normalizeId_(getScriptProps_().getProperty(key));
+  if (!raw) return {};
+
+  try {
+    const list = JSON.parse(raw);
+    const map = {};
+    (Array.isArray(list) ? list : []).forEach(function (m) {
+      const metric = normalizeId_(m);
+      if (metric) map[metric] = true;
+    });
+    return map;
+  } catch (e) {
+    return {};
+  }
+}
+
+function writeTikTokInvalidMetricsCache_(advertiserId, invalidLookup) {
+  const key = getTikTokInvalidMetricsCacheKey_(advertiserId);
+  const metrics = Object.keys(invalidLookup || {}).sort();
+  getScriptProps_().setProperty(key, JSON.stringify(metrics));
+}
+
+function fetchTikTokReportBodyWithMetricFallback_(basePayload, requestedMetrics) {
+  const advertiserId = normalizeId_(basePayload && basePayload.advertiser_id);
+  const invalidCache = readTikTokInvalidMetricsCache_(advertiserId);
+  let metrics = (requestedMetrics || []).filter(function (m) {
+    return !invalidCache[normalizeId_(m)];
+  });
+  if (!metrics.length) {
+    metrics = (requestedMetrics || []).slice();
+  }
+  if (!metrics.length) {
+    throw new Error('No TikTok metrics requested.');
+  }
+
+  const maxAttempts = Math.max(4, metrics.length + 2);
+  for (let i = 0; i < maxAttempts; i++) {
+    const payload = Object.assign({}, basePayload, { metrics: metrics });
+    try {
+      return fetchTikTokReportBodyWithFallback_(payload);
+    } catch (e) {
+      const invalid = extractTikTokInvalidMetricFields_(e && e.message);
+      if (!invalid.length) throw e;
+
+      const invalidLookup = {};
+      invalid.forEach(function (m) {
+        invalidLookup[m] = true;
+        invalidCache[m] = true;
+      });
+      const nextMetrics = metrics.filter(function (m) {
+        return !invalidLookup[normalizeId_(m)];
+      });
+
+      if (!nextMetrics.length || nextMetrics.length === metrics.length) throw e;
+      metrics = nextMetrics;
+      writeTikTokInvalidMetricsCache_(advertiserId, invalidCache);
+    }
+  }
+
+  throw new Error('TikTok report request failed after metric fallback attempts.');
+}
+
 function normalizeTikTokDate_(value) {
   if (value === null || value === undefined || value === '') return '';
 
@@ -275,21 +357,27 @@ function findTikTokAdgroupById_(advertiserId, adgroupId) {
 
 function fetchTikTokReportRow_(advertiserId, adgroupId, startDate, endDate) {
   const metricMap = getTikTokMetricMap_();
-  const metrics = [
-    metricMap.impressions[0],
-    metricMap.reach[0],
-    metricMap.cpm[0],
-    metricMap.video_p25_count[0],
-    metricMap.video_p50_count[0],
-    metricMap.video_p75_count[0],
-    metricMap.video_p100_count[0]
-  ];
+  const metricCandidates = []
+    .concat(metricMap.impressions)
+    .concat(metricMap.reach)
+    .concat(metricMap.cpm)
+    .concat(metricMap.video_p25_count)
+    .concat(metricMap.video_p50_count)
+    .concat(metricMap.video_p75_count)
+    .concat(metricMap.video_p100_count);
+  const metricLookup = {};
+  const metrics = metricCandidates.filter(function (m) {
+    const key = normalizeId_(m);
+    if (!key || metricLookup[key]) return false;
+    metricLookup[key] = true;
+    return true;
+  });
 
-  const payload = {
+  const basePayload = {
     advertiser_id: advertiserId,
+    report_type: 'BASIC',
     data_level: 'AUCTION_ADGROUP',
     dimensions: ['adgroup_id'],
-    metrics: metrics,
     start_date: startDate,
     end_date: endDate,
     page: 1,
@@ -297,7 +385,7 @@ function fetchTikTokReportRow_(advertiserId, adgroupId, startDate, endDate) {
     filters: [{ field_name: 'adgroup_ids', filter_type: 'IN', filter_value: [String(adgroupId)] }]
   };
 
-  const body = fetchTikTokReportBodyWithFallback_(payload);
+  const body = fetchTikTokReportBodyWithMetricFallback_(basePayload, metrics);
   const list = body.data && body.data.list ? body.data.list : [];
 
   for (let i = 0; i < list.length; i++) {

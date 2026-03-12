@@ -57,7 +57,10 @@ function formatDate_(value) {
 
 function toNumber_(value) {
   if (value === '' || value === null || value === undefined) return 0;
-  const n = Number(value);
+  const normalized = typeof value === 'string'
+    ? value.replace(/,/g, '').trim()
+    : value;
+  const n = Number(normalized);
   return isNaN(n) ? 0 : n;
 }
 
@@ -152,7 +155,7 @@ function parseCompositeEntityName_(entityName) {
   };
 }
 
-function getCachedReach_(platform, accountId, entityLevel, entityId) {
+function getCachedReach_(platform, accountId, entityLevel, entityId, options) {
   ensureHeader_(SHEETS.REACH_CACHE, HEADERS.REACH_CACHE);
   const now = new Date().getTime();
   const rows = readObjects_(SHEETS.REACH_CACHE);
@@ -160,6 +163,10 @@ function getCachedReach_(platform, accountId, entityLevel, entityId) {
   const targetAccountId = normalizeId_(accountId);
   const targetLevel = normalizeEntityLevel_(entityLevel);
   const targetEntityId = normalizeId_(entityId);
+  const opts = options || {};
+  const allowExpired = !!opts.allowExpired;
+  let freshestValid = null;
+  let freshestAny = null;
 
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
@@ -173,16 +180,21 @@ function getCachedReach_(platform, accountId, entityLevel, entityId) {
     if (normalizeId_(r.entity_id) !== targetEntityId) continue;
 
     const cachedAt = r.cached_at ? new Date(r.cached_at).getTime() : 0;
-    if (!cachedAt || isNaN(cachedAt)) return null;
+    if (!cachedAt || isNaN(cachedAt)) continue;
+    const reach = toNumber_(r.reach);
 
-    const ageHours = (now - cachedAt) / 3600000;
-    if (ageHours > REACH_CACHE_TTL_HOURS) {
-      return null;
+    if (!freshestAny || cachedAt > freshestAny.cachedAt) {
+      freshestAny = { cachedAt: cachedAt, reach: reach };
     }
 
-    return toNumber_(r.reach);
+    const ageHours = (now - cachedAt) / 3600000;
+    if (ageHours <= REACH_CACHE_TTL_HOURS && (!freshestValid || cachedAt > freshestValid.cachedAt)) {
+      freshestValid = { cachedAt: cachedAt, reach: reach };
+    }
   }
 
+  if (freshestValid) return freshestValid.reach;
+  if (allowExpired && freshestAny) return freshestAny.reach;
   return null;
 }
 

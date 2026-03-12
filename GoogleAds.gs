@@ -913,9 +913,10 @@ function getGoogleReachWithCache_(entityId, entityName, accountId) {
   if (cached !== null) {
     return cached;
   }
+  const staleCached = getCachedReach_('google', resolvedAccountId, 'campaign', safeEntityId, { allowExpired: true });
 
   if (GOOGLE_SKIP_UNIQUE_USERS_FOR_RUN_) {
-    return '';
+    return staleCached !== null ? staleCached : '';
   }
 
   Utilities.sleep(250);
@@ -935,6 +936,12 @@ function getGoogleReachWithCache_(entityId, entityName, accountId) {
 
     if (uniqueUsers !== '') {
       setCachedReach_('google', resolvedAccountId, 'campaign', safeEntityId, entityName, uniqueUsers);
+      if (uniqueUsers === 0 && staleCached !== null && staleCached > 0) {
+        return staleCached;
+      }
+    }
+    if (uniqueUsers === '' && staleCached !== null) {
+      return staleCached;
     }
     return uniqueUsers;
   } catch (e) {
@@ -942,6 +949,6 @@ function getGoogleReachWithCache_(entityId, entityName, accountId) {
       GOOGLE_SKIP_UNIQUE_USERS_FOR_RUN_ = true;
     }
     log_('Google unique_users query failed', 'campaign_id=' + safeEntityId + '; reason=' + (e.message || e));
-    return '';
+    return staleCached !== null ? staleCached : '';
   }
 }
