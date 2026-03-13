@@ -55,6 +55,17 @@ function formatDate_(value) {
   return Utilities.formatDate(new Date(value), Session.getScriptTimeZone(), 'yyyy-MM-dd');
 }
 
+function getYesterdayDate_() {
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  date.setDate(date.getDate() - 1);
+  return date;
+}
+
+function getYesterdayDateKey_() {
+  return formatDate_(getYesterdayDate_());
+}
+
 function toNumber_(value) {
   if (value === '' || value === null || value === undefined) return 0;
   const normalized = typeof value === 'string'

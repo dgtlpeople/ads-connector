@@ -160,12 +160,14 @@ function fetchGoogleEntityMetrics_(entity) {
   if (!GOOGLE_SKIP_UNIQUE_USERS_FOR_RUN_) {
     fields.push('metrics.unique_users');
   }
+  const yesterday = getYesterdayDateKey_();
 
   const baseQuery = [
     'SELECT',
     '  ' + fields.join(',\n  '),
     'FROM campaign',
-    'WHERE campaign.id = ' + campaignId
+    'WHERE campaign.id = ' + campaignId,
+    "  AND segments.date <= '" + yesterday + "'"
   ].join('\n');
 
   let selected = null;

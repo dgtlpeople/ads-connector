@@ -421,8 +421,8 @@ function fetchTikTokEntityMetrics_(entityId, accountId, maybeEntity) {
 
   const endDate = normalizeTikTokDate_(adgroup.schedule_end_time) || normalizeId_(entity.end_date) || formatDate_(new Date());
   let reportEndDate = endDate;
-  const today = formatDate_(new Date());
-  if (reportEndDate > today) reportEndDate = today;
+  const yesterday = getYesterdayDateKey_();
+  if (reportEndDate > yesterday) reportEndDate = yesterday;
 
   const reportRow = fetchTikTokReportRow_(advertiserId, adgroupId, startDate, reportEndDate) || {};
   const metricMap = getTikTokMetricMap_();

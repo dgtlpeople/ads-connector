@@ -142,10 +142,10 @@ function fetchMetaEntityMetrics_(entity) {
     fields: 'id,name,campaign_id,start_time,end_time,effective_status,status,optimization_goal,campaign{id,name,objective}'
   });
 
-  const today = formatDate_(new Date());
-  let since = formatDate_(adset.start_time) || today;
-  let until = formatDate_(adset.end_time) || today;
-  if (until > today) until = today;
+  const yesterday = getYesterdayDateKey_();
+  let since = formatDate_(adset.start_time) || yesterday;
+  let until = formatDate_(adset.end_time) || yesterday;
+  if (until > yesterday) until = yesterday;
   if (since > until) since = until;
 
   const insights = metaApiGet_(adsetId + '/insights', {

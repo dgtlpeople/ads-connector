@@ -4,7 +4,7 @@ function buildSummary() {
     ensureHeader_(SHEETS.SUMMARY, HEADERS.SUMMARY);
     clearDataKeepHeader_(SHEETS.SUMMARY);
 
-    const today = new Date();
+    const yesterday = getYesterdayDate_();
     const rows = readObjects_(SHEETS.RAW_ALL);
     const out = rows.map(function (r) {
       const start = r.start_date ? new Date(r.start_date) : null;
@@ -15,12 +15,12 @@ function buildSummary() {
 
       if (start && end && !isNaN(start.getTime()) && !isNaN(end.getTime())) {
         daysTotal = Math.max(1, Math.floor((end.getTime() - start.getTime()) / 86400000) + 1);
-        if (today < start) {
+        if (yesterday < start) {
           daysElapsed = 0;
-        } else if (today > end) {
+        } else if (yesterday >= end) {
           daysElapsed = daysTotal;
         } else {
-          daysElapsed = Math.floor((today.getTime() - start.getTime()) / 86400000) + 1;
+          daysElapsed = Math.floor((yesterday.getTime() - start.getTime()) / 86400000) + 1;
         }
       }
 

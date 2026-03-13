@@ -161,12 +161,14 @@ function fetchGoogleEntityMetrics_(entity) {
     'metrics.video_quartile_p75_rate',
     'metrics.video_quartile_p100_rate'
   ];
+  const yesterday = getYesterdayDateKey_();
 
   const baseQuery = [
     'SELECT',
     '  ' + fields.join(',\n  '),
     'FROM campaign',
-    'WHERE campaign.id = ' + campaignId
+    'WHERE campaign.id = ' + campaignId,
+    "  AND segments.date <= '" + yesterday + "'"
   ].join('\n');
 
   const selected = flattenGoogleMetricRow_(googleAdsSearchStream_(baseQuery));
@@ -909,13 +911,13 @@ function upsertGoogleReachCache_(campaignId, entityName, reach) {
 function queryGoogleUniqueUsersDescending_(campaignId) {
   const safeCampaignId = normalizeId_(campaignId).replace(/-/g, '');
   const windows = [30, 28, 21, 14, 7];
-  const today = new Date();
-  const end = formatDate_(today);
+  const yesterday = getYesterdayDate_();
+  const end = formatDate_(yesterday);
   let zeroCandidate = null;
 
   for (let i = 0; i < windows.length; i++) {
     const days = windows[i];
-    const startDate = new Date(today.getTime() - (days - 1) * 86400000);
+    const startDate = new Date(yesterday.getTime() - (days - 1) * 86400000);
     const start = formatDate_(startDate);
     const query = [
       'SELECT',
