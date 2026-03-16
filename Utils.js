@@ -72,6 +72,24 @@ function toNumber_(value) {
   return isNaN(n) ? 0 : n;
 }
 
+function sanitizePlanGoal_(value) {
+  if (value === '' || value === null || value === undefined) return '';
+  const normalized = typeof value === 'string'
+    ? value.replace(/,/g, '').trim()
+    : value;
+  if (normalized === '') return '';
+
+  const n = Number(normalized);
+  if (isNaN(n)) return '';
+
+  // PLAN uses 1 as a default placeholder, not a meaningful goal.
+  return n === 1 ? '' : n;
+}
+
+function hasUsablePlanGoal_(value) {
+  return sanitizePlanGoal_(value) !== '';
+}
+
 function normalizeId_(value) {
   return String(value || '').trim();
 }

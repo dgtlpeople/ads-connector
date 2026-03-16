@@ -24,20 +24,42 @@ function buildSummary() {
         }
       }
 
-      const goalImpressions = toNumber_(r.goal_impressions);
-      const goalReach = toNumber_(r.goal_reach);
+      const rawGoalImpressions = sanitizePlanGoal_(r.goal_impressions);
+      const rawGoalReach = sanitizePlanGoal_(r.goal_reach);
+      const hasGoalImpressions = rawGoalImpressions !== '';
+      const hasGoalReach = rawGoalReach !== '';
+      const goalImpressions = hasGoalImpressions ? toNumber_(rawGoalImpressions) : '';
+      const goalReach = hasGoalReach ? toNumber_(rawGoalReach) : '';
       const impressions = toNumber_(r.impressions);
       const reach = toNumber_(r.reach);
 
-      const expectedImpressionsToDate = daysTotal > 0 ? goalImpressions * (daysElapsed / daysTotal) : 0;
-      const expectedReachToDate = daysTotal > 0 ? goalReach * (daysElapsed / daysTotal) : 0;
+      const expectedImpressionsToDate = hasGoalImpressions && daysTotal > 0
+        ? goalImpressions * (daysElapsed / daysTotal)
+        : '';
+      const expectedReachToDate = hasGoalReach && daysTotal > 0
+        ? goalReach * (daysElapsed / daysTotal)
+        : '';
 
-      const impressionDeliveryPct = goalImpressions > 0 ? impressions / goalImpressions : 0;
-      const reachDeliveryPct = goalReach > 0 ? reach / goalReach : 0;
-      const impressionPacePct = expectedImpressionsToDate > 0 ? impressions / expectedImpressionsToDate : 0;
-      const reachPacePct = expectedReachToDate > 0 ? reach / expectedReachToDate : 0;
+      const impressionDeliveryPct = hasGoalImpressions && goalImpressions > 0
+        ? impressions / goalImpressions
+        : '';
+      const reachDeliveryPct = hasGoalReach && goalReach > 0
+        ? reach / goalReach
+        : '';
+      const impressionPacePct = hasGoalImpressions && expectedImpressionsToDate > 0
+        ? impressions / expectedImpressionsToDate
+        : '';
+      const reachPacePct = hasGoalReach && expectedReachToDate > 0
+        ? reach / expectedReachToDate
+        : '';
 
-      const action = recommendAction_(impressionPacePct, reachPacePct, toNumber_(r.frequency));
+      const action = recommendAction_(
+        impressionPacePct,
+        reachPacePct,
+        toNumber_(r.frequency),
+        hasGoalImpressions,
+        hasGoalReach
+      );
 
       return [
         r.platform || '',
@@ -80,10 +102,28 @@ function buildSummary() {
   });
 }
 
-function recommendAction_(impressionPacePct, reachPacePct, frequency) {
+function recommendAction_(impressionPacePct, reachPacePct, frequency, hasGoalImpressions, hasGoalReach) {
+  const hasImpGoal = !!hasGoalImpressions;
+  const hasReachGoal = !!hasGoalReach;
+
+  if (!hasImpGoal && !hasReachGoal) return 'No goal';
+
   const imp = toNumber_(impressionPacePct);
   const reach = toNumber_(reachPacePct);
   const freq = toNumber_(frequency);
+
+  if (hasImpGoal && !hasReachGoal) {
+    if (imp < 0.9) return 'Increase budget';
+    if (imp > 1.5) return 'Decrease budget';
+    if (imp >= 0.95 && imp <= 1.1) return 'On track';
+    return 'Monitor';
+  }
+
+  if (!hasImpGoal && hasReachGoal) {
+    if (reach < 0.9) return 'Expand reach';
+    if (reach >= 0.95 && reach <= 1.1) return 'On track';
+    return 'Monitor';
+  }
 
   if (imp < 0.9) return 'Increase budget';
   if (imp > 1.5) return 'Decrease budget';

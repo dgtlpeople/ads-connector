@@ -10,6 +10,7 @@ function onOpen() {
     .addSeparator()
     .addItem('Refresh RAW_ALL from PLAN (Google)', 'refreshRawAllFromPlanGoogle')
     .addItem('Refresh RAW_ALL from PLAN (Meta)', 'refreshRawAllFromPlanMeta')
+    .addItem('Refresh RAW_ALL from PLAN (All platforms)', 'refreshRawAllFromPlanAll')
     .addItem('Build SUMMARY', 'buildSummary')
     .addItem('Build DASHBOARD', 'buildDashboard')
     .addItem('Generate VIDEO Ads Script', 'generateVideoAdsScript')
@@ -83,6 +84,35 @@ function refreshRawAllFromPlanMeta() {
   withErrorLogging_('refreshRawAllFromPlanMeta failed', function () {
     refreshRawAllFromPlan_('meta');
     SpreadsheetApp.getUi().alert('RAW_ALL refreshed for Meta.');
+  });
+}
+
+function refreshRawAllFromPlanAll() {
+  withErrorLogging_('refreshRawAllFromPlanAll failed', function () {
+    const platforms = ['google', 'meta'];
+    const succeeded = [];
+    const failed = [];
+
+    platforms.forEach(function (platform) {
+      try {
+        refreshRawAllFromPlan_(platform);
+        succeeded.push(platform);
+      } catch (e) {
+        const reason = e && e.message ? e.message : String(e);
+        failed.push(platform + ': ' + reason);
+        log_('RAW_ALL refresh failed', 'platform=' + platform + '; reason=' + reason);
+      }
+    });
+
+    if (failed.length) {
+      SpreadsheetApp.getUi().alert(
+        'RAW_ALL refresh finished with errors.\nSuccess: ' + (succeeded.length ? succeeded.join(', ') : 'none') +
+        '\nFailed:\n- ' + failed.join('\n- ')
+      );
+      return;
+    }
+
+    SpreadsheetApp.getUi().alert('RAW_ALL refreshed for all platforms: ' + succeeded.join(', ') + '.');
   });
 }
 

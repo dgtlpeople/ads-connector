@@ -34,13 +34,16 @@ function refreshRawAllFromPlan_(platform) {
     }
 
     planRows.forEach(function (planRow) {
+      const goalImpressions = sanitizePlanGoal_(planRow.goal_impressions);
+      const goalReach = sanitizePlanGoal_(planRow.goal_reach);
+
       try {
         const normalizedEntity = normalizePlanEntity_(planRow);
         const enabledMatch = findEnabledEntityMatch_(enabledByKey, targetPlatform, normalizedEntity);
 
         const mergedEntity = mergePlanAndEnabledEntity_(normalizedEntity, enabledMatch);
-        mergedEntity.goal_reach = toNumber_(planRow.goal_reach);
-        mergedEntity.goal_impressions = toNumber_(planRow.goal_impressions);
+        mergedEntity.goal_reach = goalReach;
+        mergedEntity.goal_impressions = goalImpressions;
 
         let metrics = null;
         if (targetPlatform === 'google') {
@@ -57,8 +60,8 @@ function refreshRawAllFromPlan_(platform) {
           throw new Error('No metrics returned for entity_id=' + mergedEntity.entity_id);
         }
 
-        metrics.goal_impressions = toNumber_(planRow.goal_impressions);
-        metrics.goal_reach = toNumber_(planRow.goal_reach);
+        metrics.goal_impressions = goalImpressions;
+        metrics.goal_reach = goalReach;
 
         const rawReach = metrics.reach === '' ? 0 : toNumber_(metrics.reach);
         metrics.frequency = rawReach > 0
@@ -85,8 +88,8 @@ function refreshRawAllFromPlan_(platform) {
           adset_name: fallback.adset_name,
           start_date: '',
           end_date: '',
-          goal_impressions: toNumber_(planRow.goal_impressions),
-          goal_reach: toNumber_(planRow.goal_reach),
+          goal_impressions: goalImpressions,
+          goal_reach: goalReach,
           impressions: 0,
           reach: '',
           frequency: 0,
@@ -214,8 +217,8 @@ function mapRawRow_(row) {
     row.adset_name || '',
     row.start_date || '',
     row.end_date || '',
-    toNumber_(row.goal_impressions),
-    toNumber_(row.goal_reach),
+    hasUsablePlanGoal_(row.goal_impressions) ? toNumber_(row.goal_impressions) : '',
+    hasUsablePlanGoal_(row.goal_reach) ? toNumber_(row.goal_reach) : '',
     toNumber_(row.impressions),
     row.reach === '' ? '' : toNumber_(row.reach),
     toNumber_(row.frequency),

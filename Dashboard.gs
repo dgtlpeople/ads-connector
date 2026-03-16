@@ -14,12 +14,16 @@ function buildDashboard() {
     const rows = readObjects_(SHEETS.SUMMARY);
 
     const totals = rows.reduce(function (acc, r) {
-      acc.goalImp += toNumber_(r.goal_impressions);
-      acc.goalReach += toNumber_(r.goal_reach);
-      acc.imp += toNumber_(r.impressions);
-      acc.reach += toNumber_(r.reach);
-      acc.expImp += toNumber_(r.expected_impressions_to_date);
-      acc.expReach += toNumber_(r.expected_reach_to_date);
+      if (hasUsablePlanGoal_(r.goal_impressions)) {
+        acc.goalImp += toNumber_(r.goal_impressions);
+        acc.imp += toNumber_(r.impressions);
+        acc.expImp += toNumber_(r.expected_impressions_to_date);
+      }
+      if (hasUsablePlanGoal_(r.goal_reach)) {
+        acc.goalReach += toNumber_(r.goal_reach);
+        acc.reach += toNumber_(r.reach);
+        acc.expReach += toNumber_(r.expected_reach_to_date);
+      }
       return acc;
     }, { goalImp: 0, goalReach: 0, imp: 0, reach: 0, expImp: 0, expReach: 0 });
 
@@ -48,9 +52,14 @@ function buildDashboard() {
     sh.getRange('A9:J9').setBackground('#E2E8F0').setFontWeight('bold').setFontColor('#1E293B');
 
     const ranked = rows
+      .filter(function (r) {
+        return hasUsablePlanGoal_(r.goal_impressions) || hasUsablePlanGoal_(r.goal_reach);
+      })
       .map(function (r) {
-        const impP = toNumber_(r.impression_pace_pct);
-        const reachP = toNumber_(r.reach_pace_pct);
+        const hasImpGoal = hasUsablePlanGoal_(r.goal_impressions);
+        const hasReachGoal = hasUsablePlanGoal_(r.goal_reach);
+        const impP = hasImpGoal ? toNumber_(r.impression_pace_pct) : '';
+        const reachP = hasReachGoal ? toNumber_(r.reach_pace_pct) : '';
         return {
           entity: r.entity_name || r.entity_id || '',
           platform: r.platform || '',
@@ -58,9 +67,9 @@ function buildDashboard() {
           campaignDurationPct: calculateCampaignDurationPct_(r),
           impPace: impP,
           reachPace: reachP,
-          impDelivery: toNumber_(r.impression_delivery_pct),
+          impDelivery: hasImpGoal ? toNumber_(r.impression_delivery_pct) : '',
           action: r.action || '',
-          volatility: Math.abs(impP - 1) + Math.abs(reachP - 1)
+          volatility: (hasImpGoal ? Math.abs(impP - 1) : 0) + (hasReachGoal ? Math.abs(reachP - 1) : 0)
         };
       })
       .sort(function (a, b) {
@@ -208,6 +217,9 @@ function calculateAverageCampaignProgress_(rows) {
   let totalDays = 0;
   let elapsedDays = 0;
   rows.forEach(function (r) {
+    if (!hasUsablePlanGoal_(r.goal_impressions) && !hasUsablePlanGoal_(r.goal_reach)) {
+      return;
+    }
     totalDays += toNumber_(r.days_total);
     elapsedDays += toNumber_(r.days_elapsed);
   });
