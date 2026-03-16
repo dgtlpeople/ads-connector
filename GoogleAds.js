@@ -78,6 +78,63 @@ function googleAdsSearchStream_(query) {
   }
 }
 
+function normalizeGoogleDateKey_(value) {
+  if (value === null || value === undefined || value === '') return '';
+
+  if (value instanceof Date) {
+    if (isNaN(value.getTime())) return '';
+    return formatDate_(value);
+  }
+
+  const asString = String(value).trim();
+  if (!asString) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(asString)) return asString;
+
+  const parsed = new Date(asString);
+  if (isNaN(parsed.getTime())) return '';
+  return formatDate_(parsed);
+}
+
+function getGoogleCampaignMetadata_(campaignId) {
+  const query = [
+    'SELECT',
+    '  campaign.id,',
+    '  campaign.name,',
+    '  campaign.start_date,',
+    '  campaign.end_date,',
+    '  campaign.status,',
+    '  campaign.advertising_channel_type',
+    'FROM campaign',
+    'WHERE campaign.id = ' + campaignId
+  ].join('\n');
+
+  return flattenGoogleMetricRow_(googleAdsSearchStream_(query));
+}
+
+function getGoogleCampaignMetricDateRange_(campaignId, entity) {
+  const yesterday = getYesterdayDateKey_();
+  let start = normalizeGoogleDateKey_(entity && entity.start_date);
+  let end = normalizeGoogleDateKey_(entity && entity.end_date);
+
+  if (!start || !end) {
+    const campaign = getGoogleCampaignMetadata_(campaignId);
+    if (campaign) {
+      start = start || normalizeGoogleDateKey_(campaign.startDate);
+      end = end || normalizeGoogleDateKey_(campaign.endDate);
+    }
+  }
+
+  start = start || yesterday;
+  end = end || yesterday;
+  if (end > yesterday) end = yesterday;
+  if (start > end) start = end;
+
+  return {
+    start: start,
+    end: end
+  };
+}
+
 function loadGoogleEntities() {
   withErrorLogging_('loadGoogleEntities failed', function () {
     ensureHeader_(SHEETS.CAMPAIGNS_ENABLED, HEADERS.CAMPAIGNS_ENABLED);
@@ -160,14 +217,14 @@ function fetchGoogleEntityMetrics_(entity) {
   if (!GOOGLE_SKIP_UNIQUE_USERS_FOR_RUN_) {
     fields.push('metrics.unique_users');
   }
-  const yesterday = getYesterdayDateKey_();
+  const dateRange = getGoogleCampaignMetricDateRange_(campaignId, entity);
 
   const baseQuery = [
     'SELECT',
     '  ' + fields.join(',\n  '),
     'FROM campaign',
     'WHERE campaign.id = ' + campaignId,
-    "  AND segments.date <= '" + yesterday + "'"
+    "  AND segments.date BETWEEN '" + dateRange.start + "' AND '" + dateRange.end + "'"
   ].join('\n');
 
   let selected = null;

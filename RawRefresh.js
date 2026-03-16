@@ -153,7 +153,9 @@ function mergePlanAndEnabledEntity_(planEntity, enabledEntity) {
     campaign_id: planEntity.campaign_id || normalizeId_(enabledEntity.campaign_id),
     campaign_name: planEntity.campaign_name || normalizeId_(enabledEntity.campaign_name),
     adset_id: planEntity.adset_id || normalizeId_(enabledEntity.adset_id),
-    adset_name: planEntity.adset_name || normalizeId_(enabledEntity.adset_name)
+    adset_name: planEntity.adset_name || normalizeId_(enabledEntity.adset_name),
+    start_date: normalizeId_(enabledEntity.start_date),
+    end_date: normalizeId_(enabledEntity.end_date)
   };
 
   if (!merged.entity_id) {
