@@ -118,13 +118,15 @@ function loadMetaEntities() {
           formatDate_(adset.start_time),
           formatDate_(adset.end_time),
           adset.effective_status || adset.status || '',
-          campaign.objective || adset.optimization_goal || ''
+          campaign.objective || adset.optimization_goal || '',
+          ''
         ]);
       });
     });
 
     if (out.length) appendRows_(SHEETS.CAMPAIGNS_ENABLED, out);
     sortCampaignsEnabled_();
+    updateCampaignsEnabledPlanStatusForPlatform_('meta');
   });
 }
 

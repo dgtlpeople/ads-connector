@@ -32,6 +32,7 @@ function buildSummary() {
       const goalReach = hasGoalReach ? toNumber_(rawGoalReach) : '';
       const impressions = toNumber_(r.impressions);
       const reach = toNumber_(r.reach);
+      const frequency = reach > 0 ? impressions / reach : 0;
 
       const expectedImpressionsToDate = hasGoalImpressions && daysTotal > 0
         ? goalImpressions * (daysElapsed / daysTotal)
@@ -53,13 +54,7 @@ function buildSummary() {
         ? reach / expectedReachToDate
         : '';
 
-      const action = recommendAction_(
-        impressionPacePct,
-        reachPacePct,
-        toNumber_(r.frequency),
-        hasGoalImpressions,
-        hasGoalReach
-      );
+      const action = recommendAction_(impressionPacePct, reachPacePct, hasGoalImpressions, hasGoalReach);
 
       return [
         r.platform || '',
@@ -77,7 +72,7 @@ function buildSummary() {
         goalReach,
         impressions,
         reach,
-        toNumber_(r.frequency),
+        frequency,
         toNumber_(r.cpm),
         toNumber_(r.video_p25),
         toNumber_(r.video_p50),
@@ -102,7 +97,7 @@ function buildSummary() {
   });
 }
 
-function recommendAction_(impressionPacePct, reachPacePct, frequency, hasGoalImpressions, hasGoalReach) {
+function recommendAction_(impressionPacePct, reachPacePct, hasGoalImpressions, hasGoalReach) {
   const hasImpGoal = !!hasGoalImpressions;
   const hasReachGoal = !!hasGoalReach;
 
@@ -110,7 +105,6 @@ function recommendAction_(impressionPacePct, reachPacePct, frequency, hasGoalImp
 
   const imp = toNumber_(impressionPacePct);
   const reach = toNumber_(reachPacePct);
-  const freq = toNumber_(frequency);
 
   if (hasImpGoal && !hasReachGoal) {
     if (imp < 0.9) return 'Increase budget';
@@ -128,7 +122,7 @@ function recommendAction_(impressionPacePct, reachPacePct, frequency, hasGoalImp
   if (imp < 0.9) return 'Increase budget';
   if (imp > 1.5) return 'Decrease budget';
   if (reach >= 1 && imp < 1) return 'Increase frequency cap';
-  if (imp > 1 && reach < 0.9) return freq >= 3 ? 'Decrease frequency cap' : 'Expand reach';
+  if (imp > 1 && reach < 0.9) return 'Expand reach';
   if (imp >= 0.95 && imp <= 1.1 && reach >= 0.95 && reach <= 1.1) return 'On track';
   return 'Monitor';
 }
