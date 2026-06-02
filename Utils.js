@@ -66,6 +66,19 @@ function getYesterdayDateKey_() {
   return formatDate_(getYesterdayDate_());
 }
 
+function getLastNDaysDateRange_(days) {
+  const n = Math.max(1, Math.round(toNumber_(days) || 1));
+  const end = getYesterdayDate_();
+  const start = new Date(end.getTime());
+  start.setDate(start.getDate() - (n - 1));
+
+  return {
+    start: formatDate_(start),
+    end: formatDate_(end),
+    days: n
+  };
+}
+
 function toNumber_(value) {
   if (value === '' || value === null || value === undefined) return 0;
   const normalized = typeof value === 'string'

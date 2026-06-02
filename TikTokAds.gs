@@ -296,6 +296,41 @@ function listTikTokAdgroups_() {
   return out;
 }
 
+function listTikTokAds_() {
+  const cfg = getTikTokConfig_();
+  const out = [];
+  let page = 1;
+  const pageSize = 100;
+
+  while (true) {
+    const body = tiktokApiRequestWithAuthRetry_('/ad/get/', 'get', {
+      advertiser_id: cfg.advertiserId,
+      page: page,
+      page_size: pageSize
+    });
+
+    const data = body.data || {};
+    const list = data.list || [];
+    list.forEach(function (item) {
+      out.push(item);
+    });
+
+    const pageInfo = data.page_info || {};
+    const totalPage = toNumber_(pageInfo.total_page);
+    if (!list.length || (totalPage > 0 && page >= totalPage)) {
+      break;
+    }
+
+    if (totalPage === 0 && list.length < pageSize) {
+      break;
+    }
+
+    page += 1;
+  }
+
+  return out;
+}
+
 function loadTikTokEntities() {
   withErrorLogging_('loadTikTokEntities failed', function () {
     ensureHeader_(SHEETS.CAMPAIGNS_ENABLED, HEADERS.CAMPAIGNS_ENABLED);
@@ -326,11 +361,49 @@ function getTikTokMetricMap_() {
     impressions: ['impressions', 'show_cnt'],
     reach: ['reach', 'unique_users', 'unique_viewers'],
     cpm: ['cpm', 'cost_per_1000_impression'],
+    spend: ['spend', 'cost'],
+    clicks: ['clicks', 'click_cnt'],
     video_p25_count: ['video_watched_25pct', 'video_play_actions_pct_25', 'video_views_p25'],
     video_p50_count: ['video_watched_50pct', 'video_play_actions_pct_50', 'video_views_p50'],
     video_p75_count: ['video_watched_75pct', 'video_play_actions_pct_75', 'video_views_p75'],
     video_p100_count: ['video_watched_100pct', 'video_play_actions_pct_100', 'video_views_p100']
   };
+}
+
+function getTikTokReportMetricNames_() {
+  const metricMap = getTikTokMetricMap_();
+  const metricCandidates = []
+    .concat(metricMap.impressions)
+    .concat(metricMap.reach)
+    .concat(metricMap.cpm)
+    .concat(metricMap.spend)
+    .concat(metricMap.clicks)
+    .concat(metricMap.video_p25_count)
+    .concat(metricMap.video_p50_count)
+    .concat(metricMap.video_p75_count)
+    .concat(metricMap.video_p100_count);
+  const metricLookup = {};
+  return metricCandidates.filter(function (m) {
+    const key = normalizeId_(m);
+    if (!key || metricLookup[key]) return false;
+    metricLookup[key] = true;
+    return true;
+  });
+}
+
+function getTikTokHierarchyReportMetricNames_() {
+  const metricMap = getTikTokMetricMap_();
+  const metricCandidates = []
+    .concat(metricMap.impressions)
+    .concat(metricMap.reach)
+    .concat(metricMap.spend);
+  const metricLookup = {};
+  return metricCandidates.filter(function (m) {
+    const key = normalizeId_(m);
+    if (!key || metricLookup[key]) return false;
+    metricLookup[key] = true;
+    return true;
+  });
 }
 
 function readTikTokMetricValue_(container, candidates) {
@@ -356,23 +429,6 @@ function findTikTokAdgroupById_(advertiserId, adgroupId) {
 }
 
 function fetchTikTokReportRow_(advertiserId, adgroupId, startDate, endDate) {
-  const metricMap = getTikTokMetricMap_();
-  const metricCandidates = []
-    .concat(metricMap.impressions)
-    .concat(metricMap.reach)
-    .concat(metricMap.cpm)
-    .concat(metricMap.video_p25_count)
-    .concat(metricMap.video_p50_count)
-    .concat(metricMap.video_p75_count)
-    .concat(metricMap.video_p100_count);
-  const metricLookup = {};
-  const metrics = metricCandidates.filter(function (m) {
-    const key = normalizeId_(m);
-    if (!key || metricLookup[key]) return false;
-    metricLookup[key] = true;
-    return true;
-  });
-
   const basePayload = {
     advertiser_id: advertiserId,
     report_type: 'BASIC',
@@ -385,7 +441,7 @@ function fetchTikTokReportRow_(advertiserId, adgroupId, startDate, endDate) {
     filters: [{ field_name: 'adgroup_ids', filter_type: 'IN', filter_value: [String(adgroupId)] }]
   };
 
-  const body = fetchTikTokReportBodyWithMetricFallback_(basePayload, metrics);
+  const body = fetchTikTokReportBodyWithMetricFallback_(basePayload, getTikTokReportMetricNames_());
   const list = body.data && body.data.list ? body.data.list : [];
 
   for (let i = 0; i < list.length; i++) {
@@ -458,6 +514,114 @@ function fetchTikTokEntityMetrics_(entityId, accountId, maybeEntity) {
     status: normalizeId_(adgroup.operation_status) || 'UNKNOWN',
     channel_type: normalizeId_(adgroup.optimization_goal) || normalizeId_(entity.channel_type)
   };
+}
+
+function fetchTikTokReportRows_(advertiserId, dataLevel, dimensions, startDate, endDate, requestedMetrics) {
+  const out = [];
+  let page = 1;
+  const pageSize = 1000;
+  const metrics = requestedMetrics || getTikTokReportMetricNames_();
+
+  while (true) {
+    const basePayload = {
+      advertiser_id: advertiserId,
+      report_type: 'BASIC',
+      data_level: dataLevel,
+      dimensions: dimensions,
+      start_date: startDate,
+      end_date: endDate,
+      page: page,
+      page_size: pageSize
+    };
+
+    const body = fetchTikTokReportBodyWithMetricFallback_(basePayload, metrics);
+    const data = body.data || {};
+    const list = data.list || [];
+    list.forEach(function (item) {
+      out.push(item);
+    });
+
+    const pageInfo = data.page_info || {};
+    const totalPage = toNumber_(pageInfo.total_page);
+    if (!list.length || (totalPage > 0 && page >= totalPage)) {
+      break;
+    }
+
+    if (totalPage === 0 && list.length < pageSize) {
+      break;
+    }
+
+    page += 1;
+  }
+
+  return out;
+}
+
+function fetchTikTokLast30AdHierarchyRows_(dateRange) {
+  const cfg = getTikTokConfig_();
+  const advertiserId = cfg.advertiserId;
+  const metricMap = getTikTokMetricMap_();
+  const adgroupById = {};
+  const adById = {};
+
+  try {
+    listTikTokAdgroups_().forEach(function (adgroup) {
+      const id = normalizeId_(adgroup.adgroup_id);
+      if (id) adgroupById[id] = adgroup;
+    });
+  } catch (e) {
+    log_('TikTok adgroup metadata lookup failed', 'advertiser_id=' + advertiserId + '; reason=' + (e.message || e));
+  }
+
+  try {
+    listTikTokAds_().forEach(function (ad) {
+      const id = normalizeId_(ad.ad_id);
+      if (id) adById[id] = ad;
+    });
+  } catch (e) {
+    log_('TikTok ad metadata lookup failed', 'advertiser_id=' + advertiserId + '; reason=' + (e.message || e));
+  }
+
+  const reportRows = fetchTikTokReportRows_(
+    advertiserId,
+    'AUCTION_AD',
+    ['ad_id'],
+    dateRange.start,
+    dateRange.end,
+    getTikTokHierarchyReportMetricNames_()
+  );
+  return reportRows.map(function (row) {
+    const dimensions = row.dimensions || {};
+    const sourceMetrics = row.metrics || row;
+    const adId = normalizeId_(dimensions.ad_id) || normalizeId_(row.ad_id);
+    const ad = adById[adId] || {};
+    const adgroupId = normalizeId_(ad.adgroup_id) || normalizeId_(dimensions.adgroup_id) || normalizeId_(row.adgroup_id);
+    const adgroup = adgroupById[adgroupId] || {};
+    const impressions = readTikTokMetricValue_(sourceMetrics, metricMap.impressions);
+    const reach = readTikTokMetricValue_(sourceMetrics, metricMap.reach);
+
+    return {
+      platform: 'tiktok',
+      account_id: advertiserId,
+      date_start: dateRange.start,
+      date_end: dateRange.end,
+      entity_level: 'ad',
+      campaign_id: normalizeId_(ad.campaign_id) || normalizeId_(adgroup.campaign_id),
+      campaign_name: normalizeId_(ad.campaign_name) || normalizeId_(adgroup.campaign_name),
+      campaign_status: normalizeId_(adgroup.campaign_operation_status),
+      child_level: 'adgroup',
+      child_id: adgroupId,
+      child_name: normalizeId_(adgroup.adgroup_name),
+      child_status: normalizeId_(adgroup.operation_status),
+      ad_id: adId,
+      ad_name: normalizeId_(ad.ad_name),
+      ad_status: normalizeId_(ad.operation_status),
+      channel_type: normalizeId_(adgroup.optimization_goal),
+      impressions: impressions,
+      reach: reach,
+      cost: readTikTokMetricValue_(sourceMetrics, metricMap.spend)
+    };
+  });
 }
 
 function refreshTikTokAccessToken_() {

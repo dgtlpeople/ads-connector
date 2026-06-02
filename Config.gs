@@ -1,6 +1,7 @@
 const SHEETS = {
   CAMPAIGNS_ENABLED: 'CAMPAIGNS_ENABLED',
   PLAN: 'PLAN',
+  AD_HIERARCHY_LAST_30: 'AD_HIERARCHY_LAST_30',
   RAW_ALL: 'RAW_ALL',
   SUMMARY: 'SUMMARY',
   LOG: 'LOG',
@@ -35,6 +36,27 @@ const HEADERS = {
     'entity_name',
     'goal_impressions',
     'goal_reach'
+  ],
+  AD_HIERARCHY_LAST_30: [
+    'platform',
+    'account_id',
+    'date_start',
+    'date_end',
+    'entity_level',
+    'campaign_id',
+    'campaign_name',
+    'campaign_status',
+    'child_level',
+    'child_id',
+    'child_name',
+    'child_status',
+    'ad_id',
+    'ad_name',
+    'ad_status',
+    'channel_type',
+    'impressions',
+    'reach',
+    'cost'
   ],
   RAW_ALL: [
     'platform',

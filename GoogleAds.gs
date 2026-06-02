@@ -271,6 +271,128 @@ function fetchGoogleEntityMetrics_(entity) {
   };
 }
 
+function fetchGoogleLast30AdHierarchyRows_(dateRange) {
+  const cfg = getGoogleAdsConfig_();
+  const fields = [
+    'campaign.id',
+    'campaign.name',
+    'campaign.status',
+    'campaign.advertising_channel_type',
+    'ad_group.id',
+    'ad_group.name',
+    'ad_group.status',
+    'ad_group_ad.ad.id',
+    'ad_group_ad.ad.name',
+    'ad_group_ad.status',
+    'metrics.impressions',
+    'metrics.cost_micros'
+  ];
+  const query = [
+    'SELECT',
+    '  ' + fields.join(',\n  '),
+    'FROM ad_group_ad',
+    "WHERE segments.date BETWEEN '" + dateRange.start + "' AND '" + dateRange.end + "'",
+    '  AND metrics.impressions > 0',
+    'ORDER BY campaign.name, ad_group.name, ad_group_ad.ad.id'
+  ].join('\n');
+
+  const out = [];
+  const chunks = googleAdsSearchStream_(query);
+  chunks.forEach(function (chunk) {
+    (chunk.results || []).forEach(function (row) {
+      const campaign = row.campaign || {};
+      const adGroup = row.adGroup || {};
+      const adGroupAd = row.adGroupAd || {};
+      const ad = adGroupAd.ad || {};
+      const metrics = row.metrics || {};
+
+      out.push({
+        platform: 'google',
+        account_id: cfg.customerId,
+        date_start: dateRange.start,
+        date_end: dateRange.end,
+        entity_level: 'ad',
+        campaign_id: String(campaign.id || ''),
+        campaign_name: campaign.name || '',
+        campaign_status: campaign.status || '',
+        child_level: 'adgroup',
+        child_id: String(adGroup.id || ''),
+        child_name: adGroup.name || '',
+        child_status: adGroup.status || '',
+        ad_id: String(ad.id || ''),
+        ad_name: ad.name || String(ad.id || ''),
+        ad_status: adGroupAd.status || '',
+        channel_type: campaign.advertisingChannelType || '',
+        impressions: toNumber_(metrics.impressions),
+        reach: '',
+        cost: toNumber_(metrics.costMicros) / 1000000
+      });
+    });
+  });
+
+  fetchGoogleCampaignReachRows_(dateRange).forEach(function (row) {
+    out.push(row);
+  });
+
+  return out;
+}
+
+function fetchGoogleCampaignReachRows_(dateRange) {
+  const cfg = getGoogleAdsConfig_();
+  const query = [
+    'SELECT',
+    '  campaign.id,',
+    '  campaign.name,',
+    '  campaign.status,',
+    '  campaign.advertising_channel_type,',
+    '  metrics.impressions,',
+    '  metrics.unique_users,',
+    '  metrics.cost_micros',
+    'FROM campaign',
+    "WHERE segments.date BETWEEN '" + dateRange.start + "' AND '" + dateRange.end + "'",
+    '  AND metrics.impressions > 0',
+    'ORDER BY campaign.name'
+  ].join('\n');
+
+  const out = [];
+  try {
+    const chunks = googleAdsSearchStream_(query);
+    chunks.forEach(function (chunk) {
+      (chunk.results || []).forEach(function (row) {
+        const campaign = row.campaign || {};
+        const metrics = row.metrics || {};
+        out.push({
+          platform: 'google',
+          account_id: cfg.customerId,
+          date_start: dateRange.start,
+          date_end: dateRange.end,
+          entity_level: 'campaign',
+          campaign_id: String(campaign.id || ''),
+          campaign_name: campaign.name || '',
+          campaign_status: campaign.status || '',
+          child_level: '',
+          child_id: '',
+          child_name: '',
+          child_status: '',
+          ad_id: '',
+          ad_name: '',
+          ad_status: '',
+          channel_type: campaign.advertisingChannelType || '',
+          impressions: toNumber_(metrics.impressions),
+          reach: metrics.uniqueUsers === undefined || metrics.uniqueUsers === null || metrics.uniqueUsers === ''
+            ? ''
+            : toNumber_(metrics.uniqueUsers),
+          cost: toNumber_(metrics.costMicros) / 1000000
+        });
+      });
+    });
+  } catch (e) {
+    log_('Google campaign reach export failed', 'reason=' + (e.message || e));
+  }
+
+  return out;
+}
+
 function isGoogleRetryableError_(code, body) {
   if (code === 429 || code === 500 || code === 502 || code === 503 || code === 504) return true;
   const text = String(body || '').toLowerCase();

@@ -13,6 +13,7 @@ function onOpen() {
     .addItem('Refresh RAW_ALL from PLAN (Meta)', 'refreshRawAllFromPlanMeta')
     .addItem('Refresh RAW_ALL from PLAN (TikTok)', 'refreshRawAllFromPlanTikTok')
     .addItem('Refresh RAW_ALL from PLAN (All platforms)', 'refreshRawAllFromPlanAll')
+    .addItem('Export last 30d ad hierarchy', 'exportLast30AdHierarchyAll')
     .addItem('Build SUMMARY', 'buildSummary')
     .addItem('Build DASHBOARD', 'buildDashboard')
     .addItem('Generate VIDEO Ads Script', 'generateVideoAdsScript')
@@ -34,6 +35,7 @@ function setupSheets() {
   withErrorLogging_('setupSheets failed', function () {
     ensureHeader_(SHEETS.CAMPAIGNS_ENABLED, HEADERS.CAMPAIGNS_ENABLED);
     ensureHeader_(SHEETS.PLAN, HEADERS.PLAN);
+    ensureHeader_(SHEETS.AD_HIERARCHY_LAST_30, HEADERS.AD_HIERARCHY_LAST_30);
     ensureHeader_(SHEETS.RAW_ALL, HEADERS.RAW_ALL);
     ensureHeader_(SHEETS.SUMMARY, HEADERS.SUMMARY);
     ensureHeader_(SHEETS.LOG, HEADERS.LOG);
@@ -128,6 +130,26 @@ function refreshRawAllFromPlanAll() {
     }
 
     SpreadsheetApp.getUi().alert('RAW_ALL refreshed for all platforms: ' + succeeded.join(', ') + '.');
+  });
+}
+
+function exportLast30AdHierarchyAll() {
+  withErrorLogging_('exportLast30AdHierarchyAll failed', function () {
+    const result = refreshLast30AdHierarchyAll_();
+    const rangeText = result.date_start + ' to ' + result.date_end;
+
+    if (result.failed.length) {
+      SpreadsheetApp.getUi().alert(
+        'AD_HIERARCHY_LAST_30 refreshed with errors for ' + rangeText + '.\nRows: ' + result.rows +
+        '\nSuccess: ' + (result.succeeded.length ? result.succeeded.join(', ') : 'none') +
+        '\nFailed:\n- ' + result.failed.join('\n- ')
+      );
+      return;
+    }
+
+    SpreadsheetApp.getUi().alert(
+      'AD_HIERARCHY_LAST_30 refreshed for ' + rangeText + '. Rows: ' + result.rows + '.'
+    );
   });
 }
 

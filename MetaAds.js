@@ -207,3 +207,81 @@ function fetchMetaEntityMetrics_(entity) {
     channel_type: campaign.objective || adset.optimization_goal || ''
   };
 }
+
+function fetchMetaLast30AdHierarchyRows_(dateRange) {
+  const cfg = getMetaConfig_();
+  const out = [];
+
+  cfg.adAccountIds.forEach(function (accountId) {
+    let metadataByAdId = {};
+    try {
+      metadataByAdId = fetchMetaAdMetadataLookup_(accountId);
+    } catch (e) {
+      log_('Meta ad metadata lookup failed', 'account_id=' + accountId + '; reason=' + (e.message || e));
+    }
+
+    const insights = metaApiGetAllPages_(accountId + '/insights', {
+      level: 'ad',
+      fields: [
+        'campaign_id',
+        'campaign_name',
+        'adset_id',
+        'adset_name',
+        'ad_id',
+        'ad_name',
+        'impressions',
+        'reach',
+        'spend'
+      ].join(','),
+      time_range: JSON.stringify({ since: dateRange.start, until: dateRange.end }),
+      limit: 500
+    });
+
+    insights.forEach(function (row) {
+      const adId = String(row.ad_id || '');
+      const metadata = metadataByAdId[adId] || {};
+      const adset = metadata.adset || {};
+      const campaign = adset.campaign || {};
+      const impressions = toNumber_(row.impressions);
+      const reach = toNumber_(row.reach);
+
+      out.push({
+        platform: 'meta',
+        account_id: accountId,
+        date_start: dateRange.start,
+        date_end: dateRange.end,
+        entity_level: 'ad',
+        campaign_id: String(row.campaign_id || campaign.id || ''),
+        campaign_name: row.campaign_name || campaign.name || '',
+        campaign_status: campaign.effective_status || campaign.status || '',
+        child_level: 'adset',
+        child_id: String(row.adset_id || adset.id || ''),
+        child_name: row.adset_name || adset.name || '',
+        child_status: adset.effective_status || adset.status || '',
+        ad_id: adId,
+        ad_name: row.ad_name || metadata.name || '',
+        ad_status: metadata.effective_status || metadata.status || '',
+        channel_type: campaign.objective || adset.optimization_goal || '',
+        impressions: impressions,
+        reach: reach,
+        cost: toNumber_(row.spend)
+      });
+    });
+  });
+
+  return out;
+}
+
+function fetchMetaAdMetadataLookup_(accountId) {
+  const ads = metaApiGetAllPages_(accountId + '/ads', {
+    fields: 'id,name,effective_status,status,adset{id,name,effective_status,status,optimization_goal,campaign{id,name,effective_status,status,objective}}',
+    limit: 500
+  });
+
+  const lookup = {};
+  ads.forEach(function (ad) {
+    const id = String(ad.id || '');
+    if (id) lookup[id] = ad;
+  });
+  return lookup;
+}
